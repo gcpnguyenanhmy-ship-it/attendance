@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<base target="_top">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Chấm công</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -38,7 +39,9 @@
     margin:0; background:var(--bg); color:var(--ink);
     font-family:'Be Vietnam Pro',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
     font-size:16px; line-height:1.5; font-weight:400;
+    -webkit-user-select:none; user-select:none;
   }
+  input{-webkit-user-select:text; user-select:text}
   button{font-family:inherit}
 
   /* Thanh trên */
@@ -94,18 +97,6 @@
   .big.cout{background:var(--btnOut); color:var(--btnOutText)}
   .big:disabled{opacity:.35; cursor:not-allowed}
 
-  /* Thanh xem thử */
-  .demo{
-    border:1px dashed var(--line); border-radius:8px; padding:10px 12px; margin:12px 0 0;
-    display:flex; flex-wrap:wrap; gap:6px; align-items:center;
-  }
-  .demo span{color:var(--muted); font-size:13px; margin-right:4px}
-  .demo button{
-    padding:5px 10px; border-radius:6px; border:1px solid var(--line); background:transparent;
-    color:var(--ink); font-size:13px; cursor:pointer;
-  }
-  .demo button[aria-pressed="true"]{background:var(--ink); color:var(--bg); border-color:var(--ink)}
-
   /* Hộp thoại */
   dialog{
     border:0; border-radius:10px; padding:0; width:min(480px,calc(100vw - 24px));
@@ -124,10 +115,6 @@
     animation:pulse 1.2s ease-in-out infinite;
   }
   @keyframes pulse{50%{border-color:rgba(255,255,255,.25)}}
-  .camNote{
-    position:absolute; left:16px; right:16px; bottom:12px; margin:0; text-align:center;
-    color:#fff; font-size:13px; text-shadow:0 1px 3px rgba(0,0,0,.6);
-  }
   .ghost,.solid{
     min-height:48px; border-radius:6px; cursor:pointer; font-size:16px; font-weight:600; width:100%;
   }
@@ -175,14 +162,6 @@
 </header>
 
 <main>
-  <div class="demo" id="demoBar" hidden>
-    <span>Xem thử:</span>
-    <button data-o="ok" aria-pressed="true">Thành công</button>
-    <button data-o="noface" aria-pressed="false">Không thấy mặt</button>
-    <button data-o="unknown" aria-pressed="false">Không nhận ra</button>
-    <button data-o="same" aria-pressed="false">Đã có trạng thái</button>
-  </div>
-
   <p id="listNote" class="note">Đang tải...</p>
   <ul id="list"></ul>
   <button id="openReg" class="add" type="button" aria-label="Đăng ký nhân viên" title="Đăng ký nhân viên">+</button>
@@ -207,7 +186,6 @@
       <div class="frame">
         <video id="v" autoplay muted playsinline></video>
         <div class="guide"></div>
-        <p id="camNote" class="camNote" hidden></p>
       </div>
       <button id="cancel" class="ghost" type="button">Hủy</button>
     </div>
@@ -242,13 +220,27 @@
   </div>
 </dialog>
 
+<!-- Nhập mã thiết bị (chỉ hỏi lần đầu trên mỗi thiết bị) -->
+<dialog id="tokDlg">
+  <div class="dlg">
+    <h2>Mã thiết bị</h2>
+    <form id="tokForm" class="reg" autocomplete="off">
+      <input id="tokInput" type="password" placeholder="Nhập mã thiết bị">
+      <p id="tokMsg" class="regMsg"></p>
+      <button class="solid" type="submit">Lưu</button>
+    </form>
+  </div>
+</dialog>
+
 <script>
-/* File này dùng được nguyên cho index.html trong Apps Script.
-   Ngoài Apps Script, trang chạy ở chế độ xem thử với dữ liệu giả. */
-const DEMO = !(window.google && google.script && google.script.run);
+/* ===================== CẤU HÌNH ===================== */
+// Dán URL web app của Apps Script (dạng https://script.google.com/macros/s/.../exec)
+const API_URL = 'DAN_URL_APPS_SCRIPT_VAO_DAY';
+// Muốn tự host model: tải thư mục model về cùng chỗ với index.html rồi đổi thành 'model/'
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
 const THRESHOLD = 0.5;
 const TZ = 'Asia/Ho_Chi_Minh';
+/* ==================================================== */
 
 let employees = [];        // {id, name, desc, status: {type,time} | null}
 let ready = false;
@@ -256,13 +248,73 @@ let stream = null;
 let scanToken = 0;         // đổi số này để hủy các vòng quét đang chạy
 let lastAction = null;
 let autoClose = null;
-let demoOutcome = 'ok';
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const call = (fn, ...args) => new Promise((ok, fail) =>
-  google.script.run.withSuccessHandler(ok).withFailureHandler(fail)[fn](...args));
 const errText = e => String((e && e.message) || e).replace(/^Error:\s*/, '');
+
+/* ---------- Mã thiết bị (token) ---------- */
+const TOKEN_KEY = 'chamcong_token';
+let memToken = '';
+const getToken = () => {
+  if (memToken) return memToken;
+  try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+};
+const setToken = t => { memToken = t; try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {} };
+const clearToken = () => { memToken = ''; try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} };
+
+function askToken(msg) {
+  return new Promise(resolve => {
+    $('tokMsg').textContent = msg || '';
+    $('tokInput').value = '';
+    if (!$('tokDlg').open) $('tokDlg').showModal();
+    $('tokForm').onsubmit = ev => {
+      ev.preventDefault();
+      const v = $('tokInput').value.trim();
+      if (!v) return;
+      setToken(v);
+      $('tokDlg').close();
+      resolve();
+    };
+  });
+}
+$('tokDlg').addEventListener('cancel', ev => ev.preventDefault());   // không cho đóng bằng phím Esc
+
+/* ---------- Gọi Apps Script ---------- */
+async function api(action, data = {}) {
+  let res;
+  try {
+    res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },   // tránh preflight CORS
+      body: JSON.stringify({ token: getToken(), action, ...data })
+    });
+  } catch (e) {
+    throw new Error('Không kết nối được máy chủ.');
+  }
+  let j;
+  try { j = await res.json(); }
+  catch (e) { throw new Error('Máy chủ trả dữ liệu không hợp lệ. Kiểm tra quyền truy cập "Bất kỳ ai" của Apps Script.'); }
+  if (!j.ok) {
+    if (j.error === 'UNAUTHORIZED') {
+      clearToken();
+      const err = new Error('Mã thiết bị không đúng. Tải lại trang để nhập lại.');
+      err.code = 'UNAUTHORIZED';
+      throw err;
+    }
+    throw new Error(j.error || 'Lỗi không xác định.');
+  }
+  return j.data;
+}
+
+/* ---------- Giữ màn hình luôn sáng (cho tablet) ---------- */
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') keepAwake();
+});
+keepAwake();
 
 /* ---------- Đồng hồ ---------- */
 function tick() {
@@ -300,6 +352,13 @@ function applyStatuses(map) {
   employees.forEach(e => e.status = map[e.id] || null);
   render();
 }
+async function loadData() {
+  const list = await api('getEmployees');
+  employees = list.map(e => ({
+    id: e.id, name: e.name, status: e.status,
+    desc: new Float32Array(JSON.parse(e.desc))
+  }));
+}
 
 /* ---------- Camera ---------- */
 async function startCamera() {
@@ -311,13 +370,15 @@ function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   $('v').srcObject = null;
 }
+const cameraReason = () => window.isSecureContext
+  ? 'Không bật được camera. Hãy cho phép camera.'
+  : 'Trang cần chạy bằng HTTPS để dùng camera.';
 
 /* ---------- Hộp thoại quét ---------- */
 function openScan(title, hint) {
   clearTimeout(autoClose);
   $('camTitle').textContent = title;
   $('camHint').textContent = hint;
-  $('camNote').hidden = true;
   $('camView').hidden = false;
   $('resView').hidden = true;
   if (!$('scanDlg').open) $('scanDlg').showModal();
@@ -385,8 +446,7 @@ async function recognise(token) {
 }
 const REASON = {
   noface: 'Không thấy khuôn mặt.',
-  unknown: 'Không nhận ra khuôn mặt.',
-  camera: 'Không bật được camera. Hãy cho phép camera.'
+  unknown: 'Không nhận ra khuôn mặt.'
 };
 
 /* ---------- Check in / Check out ---------- */
@@ -400,19 +460,15 @@ async function doCheck(type) {
     await startCamera();
     if (token !== scanToken) return stopCamera();
   } catch (e) {
-    if (!DEMO) return showResult({ ok: false, title: label + ' thất bại', sub: REASON.camera });
-    $('camNote').hidden = false;
-    $('camNote').textContent = 'Xem thử: camera hiện ở đây.';
+    return showResult({ ok: false, title: label + ' thất bại', sub: cameraReason() });
   }
 
-  if (DEMO) { await sleep(1600); if (token !== scanToken) return; return demoCheck(type, label); }
-
-  const res = await recognise(token);
-  if (res.cancelled || token !== scanToken) return;
-  if (res.error) return showResult({ ok: false, title: label + ' thất bại', sub: REASON[res.error] });
-
   try {
-    const r = await call('logCheck', res.emp.id, res.emp.name, type);
+    const res = await recognise(token);
+    if (res.cancelled || token !== scanToken) return;
+    if (res.error) return showResult({ ok: false, title: label + ' thất bại', sub: REASON[res.error] });
+
+    const r = await api('logCheck', { id: res.emp.id, type });
     if (token !== scanToken) return;
     handleLog(res.emp, type, label, r);
   } catch (e) {
@@ -422,17 +478,17 @@ async function doCheck(type) {
 
 function handleLog(emp, type, label, r) {
   const verb = type === 'IN' ? 'check in' : 'check out';
+  const fail = sub => showResult({ ok: false, title: label + ' thất bại', sub });
   if (r.status === 'OK') {
     const e = employees.find(x => x.id === emp.id);
     if (e) e.status = { type, time: r.time };
     render(emp.id);
     return showResult({ ok: true, kind: type === 'IN' ? 'in' : 'out', title: label + ' thành công', sub: emp.name + ' · ' + r.time });
   }
-  if (r.status === 'SAME')
-    return showResult({ ok: false, title: label + ' thất bại', sub: `${emp.name} đã ${verb} lúc ${r.time}.` });
-  if (r.status === 'NO_IN')
-    return showResult({ ok: false, title: label + ' thất bại', sub: `${emp.name} chưa check in hôm nay.` });
-  showResult({ ok: false, title: label + ' thất bại', sub: 'Không ghi nhận được.' });
+  if (r.status === 'SAME')    return fail(`${emp.name} đã ${verb} lúc ${r.time}.`);
+  if (r.status === 'NO_IN')   return fail(`${emp.name} chưa check in hôm nay.`);
+  if (r.status === 'UNKNOWN') return fail('Nhân viên không tồn tại trong danh sách.');
+  fail('Không ghi nhận được.');
 }
 
 $('btnIn').addEventListener('click', () => doCheck('IN'));
@@ -451,7 +507,7 @@ $('regForm').addEventListener('submit', async ev => {
   if (!id || !name || !pin) return say('Nhập đủ thông tin.');
   if (employees.some(e => e.id === id)) return say('Mã nhân viên đã tồn tại.');
   try {
-    const ok = DEMO ? true : await call('checkPin', pin);
+    const ok = await api('checkPin', { pin });
     if (!ok) return say('Sai mã PIN.');
   } catch (e) { return say(errText(e)); }
   $('regDlg').close();
@@ -482,24 +538,19 @@ async function doRegister(id, name, pin) {
     await startCamera();
     if (token !== scanToken) return stopCamera();
   } catch (e) {
-    if (!DEMO) return showResult({ ok: false, title: 'Đăng ký thất bại', sub: REASON.camera });
-    $('camNote').hidden = false;
-    $('camNote').textContent = 'Xem thử: camera hiện ở đây.';
+    return showResult({ ok: false, title: 'Đăng ký thất bại', sub: cameraReason() });
   }
 
   try {
-    if (DEMO) {
-      await sleep(2000); if (token !== scanToken) return;
-      employees.push({ id, name, desc: null, status: null });
-    } else {
-      const samples = await captureSamples(token);
-      if (samples === null || token !== scanToken) return;
-      if (samples.length < 3) return showResult({ ok: false, title: 'Đăng ký thất bại', sub: REASON.noface });
-      const avg = new Float32Array(128);
-      samples.forEach(s => s.forEach((v, i) => avg[i] += v / 3));
-      await call('registerEmployee', id, name, JSON.stringify(Array.from(avg)), pin);
-      employees.push({ id, name, desc: avg, status: null });
-    }
+    const samples = await captureSamples(token);
+    if (samples === null || token !== scanToken) return;
+    if (samples.length < 3) return showResult({ ok: false, title: 'Đăng ký thất bại', sub: REASON.noface });
+
+    const avg = new Float32Array(128);
+    samples.forEach(s => s.forEach((v, i) => avg[i] += v / 3));
+    await api('registerEmployee', { id, name, descJson: JSON.stringify(Array.from(avg)), pin });
+    employees.push({ id, name, desc: avg, status: null });
+
     $('regForm').reset();
     render(id);
     showResult({ ok: true, kind: 'in', title: 'Đã đăng ký', sub: name });
@@ -508,61 +559,42 @@ async function doRegister(id, name, pin) {
   }
 }
 
-/* ---------- Xem thử ---------- */
-function demoTime() {
-  return new Date().toLocaleTimeString('vi-VN', { timeZone: TZ, hour12: false });
-}
-function demoCheck(type, label) {
-  const verb = type === 'IN' ? 'check in' : 'check out';
-  const fail = sub => showResult({ ok: false, title: label + ' thất bại', sub });
-  if (demoOutcome === 'noface') return fail(REASON.noface);
-  if (demoOutcome === 'unknown') return fail(REASON.unknown);
-  if (demoOutcome === 'same') {
-    const e = employees.find(x => x.status && x.status.type === type) || employees[0];
-    const t = e.status ? e.status.time : '08:00:00';
-    return fail(`${e.name} đã ${verb} lúc ${t}.`);
-  }
-  const want = e => type === 'IN' ? (!e.status || e.status.type === 'OUT') : (e.status && e.status.type === 'IN');
-  const e = employees.find(want);
-  if (!e) return fail('Xem thử: không còn ai phù hợp, thử nút kia.');
-  handleLog(e, type, label, { status: 'OK', time: demoTime() });
-}
-
 /* ---------- Khởi động ---------- */
 async function init() {
-  if (DEMO) {
-    $('demoBar').hidden = false;
-    document.querySelectorAll('[data-o]').forEach(b => b.addEventListener('click', () => {
-      demoOutcome = b.dataset.o;
-      document.querySelectorAll('[data-o]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    }));
-    employees = [
-      { id: 'NV001', name: 'Nguyễn Văn An',   status: { type: 'IN',  time: '07:58:20' } },
-      { id: 'NV002', name: 'Trần Thị Bình',   status: { type: 'OUT', time: '11:45:03' } },
-      { id: 'NV003', name: 'Lê Hoàng Cường',  status: null },
-      { id: 'NV004', name: 'Phạm Thu Dung',   status: null },
-      { id: 'NV005', name: 'Võ Minh Em',      status: { type: 'IN',  time: '08:12:47' } },
-      { id: 'NV006', name: 'Đặng Quốc Phong', status: null }
-    ];
-    render();
-    ready = true;
-  } else {
-    const list = await call('getEmployees');
-    employees = list.map(e => ({ id: e.id, name: e.name, status: e.status, desc: new Float32Array(JSON.parse(e.desc)) }));
-    render();
-    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-    ready = true;
-    // cập nhật trạng thái mỗi 60 giây (cho trường hợp nhiều thiết bị cùng dùng)
-    setInterval(async () => {
-      if (!ready || $('scanDlg').open || $('regDlg').open) return;
-      try { applyStatuses(await call('getStatuses')); } catch (e) {}
-    }, 60000);
+  if (!API_URL || API_URL.indexOf('DAN_URL') === 0) {
+    throw new Error('Chưa điền API_URL trong index.html.');
   }
+
+  let msg = '';
+  for (;;) {
+    if (!getToken()) await askToken(msg);
+    try { await loadData(); break; }
+    catch (e) {
+      if (e.code === 'UNAUTHORIZED') { msg = 'Mã thiết bị không đúng.'; continue; }
+      throw e;
+    }
+  }
+  render();
+
+  await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+  ready = true;
+
   $('btnIn').disabled = false;
   $('btnOut').disabled = false;
   $('actNote').hidden = true;
+
+  // Mỗi 60 giây cập nhật trạng thái; mỗi 10 phút tải lại cả danh sách (nhận người mới đăng ký ở thiết bị khác)
+  let n = 0;
+  setInterval(async () => {
+    if (!ready || $('scanDlg').open || $('regDlg').open || $('tokDlg').open) return;
+    try {
+      n++;
+      if (n % 10 === 0) { await loadData(); render(); }
+      else applyStatuses(await api('getStatuses'));
+    } catch (e) {}
+  }, 60000);
 }
 init().catch(e => {
   $('listNote').hidden = false;
