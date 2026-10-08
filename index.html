@@ -131,6 +131,8 @@
   .resIcon svg{width:88px; height:88px}
   .res h2{margin-top:14px; font-size:22px}
   .res p{margin:6px 0 0; color:var(--muted); font-size:16px; overflow-wrap:anywhere}
+  .res p.stats{margin-top:14px; font-size:12px; line-height:1.5; color:var(--muted); font-variant-numeric:tabular-nums}
+  .res p.stats:empty{display:none}
   #resBtns{margin-top:18px}
   .tick{stroke-dasharray:60; stroke-dashoffset:60; animation:draw .5s .12s ease forwards}
   @keyframes draw{to{stroke-dashoffset:0}}
@@ -194,6 +196,7 @@
         <div id="resIcon" class="resIcon"></div>
         <h2 id="resTitle"></h2>
         <p id="resSub"></p>
+        <p id="resStats" class="stats"></p>
       </div>
       <div id="resBtns" class="two">
         <button id="retry" class="solid" type="button">Thử lại</button>
@@ -248,6 +251,7 @@ let stream = null;
 let scanToken = 0;         // đổi số này để hủy các vòng quét đang chạy
 let lastAction = null;
 let autoClose = null;
+let lastStats = '';        // chuỗi số liệu đo của lần quét gần nhất
 
 // Bộ phát hiện mặt: mặc định SSD (chính xác). Nếu thiết bị không có WebGL sẽ tự đổi sang Tiny (nhanh) trong init()
 let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 });
@@ -392,6 +396,7 @@ const cameraReason = () => window.isSecureContext
 /* ---------- Hộp thoại quét ---------- */
 function openScan(title, hint) {
   clearTimeout(autoClose);
+  lastStats = '';
   $('camTitle').textContent = title;
   $('camHint').textContent = hint;
   $('camView').hidden = false;
@@ -417,6 +422,7 @@ function showResult(r) {      // r = {ok, kind: 'in'|'out', title, sub}
   $('resIcon').innerHTML = r.ok ? ICON_OK(r.kind) : ICON_FAIL;
   $('resTitle').textContent = r.title;
   $('resSub').textContent = r.sub;
+  $('resStats').textContent = lastStats;
   $('retry').hidden = r.ok;
   $('resBtns').style.gridTemplateColumns = r.ok ? '1fr' : '1fr 1fr';
   $('done').className = r.ok ? 'quiet' : 'ghost';
@@ -441,25 +447,68 @@ function matchEmployee(d) {
   return bestDist <= THRESHOLD ? best : null;
 }
 // Thử nhận diện tối đa 10 giây; cần khớp cùng một người 2 lần liên tiếp mới chấp nhận
+// Tổng hợp số liệu đo được của một phiên quét
+function finishStats(S, t0, outcome) {
+  const now = performance.now();
+  const lat = S.lat;
+  const sum = lat.reduce((a, b) => a + b, 0);
+  const st = {
+    outcome,                                        // 'matched' | 'unknown' | 'noface'
+    backend: faceapi.tf.getBackend(),
+    totalMs: Math.round(now - t0),                  // tổng thời gian từ lúc bắt đầu quét
+    attempts: S.attempts,                           // số lần quét
+    facesFound: S.faces,                            // số lần quét thấy mặt
+    firstFaceMs: S.firstFaceMs === null ? null : Math.round(S.firstFaceMs),   // lúc thấy mặt đầu tiên
+    matchMs: S.matchMs === null ? null : Math.round(S.matchMs),               // lúc nhận ra người
+    avgLatMs: lat.length ? Math.round(sum / lat.length) : 0,                  // độ trễ trung bình 1 lần quét
+    minLatMs: lat.length ? Math.round(Math.min(...lat)) : 0,
+    maxLatMs: lat.length ? Math.round(Math.max(...lat)) : 0,
+    scansPerSec: +(S.attempts / ((now - t0) / 1000)).toFixed(2)
+  };
+  console.log('SCAN STATS', st);
+  console.table(lat.map((ms, i) => ({ lan: i + 1, detectMs: Math.round(ms), thayMat: S.hit[i] ? 'có' : 'không' })));
+  return st;
+}
+function fmtStats(s) {
+  if (!s) return '';
+  const f = v => v === null ? '-' : v + 'ms';
+  return `Quét ${s.attempts} lần (${s.facesFound} thấy mặt) / ${s.totalMs}ms · ` +
+    `trễ TB ${s.avgLatMs}ms (${s.minLatMs}-${s.maxLatMs}) · ${s.scansPerSec}/giây · ` +
+    `thấy mặt lúc ${f(s.firstFaceMs)} · nhận ra lúc ${f(s.matchMs)} · ${s.backend}`;
+}
+
 async function recognise(token) {
-  const t0 = Date.now();
+  const t0 = performance.now();
+  const S = { attempts: 0, faces: 0, lat: [], hit: [], firstFaceMs: null, matchMs: null };
   let seenFace = false, streakId = null, streak = 0;
   await sleep(700);
-  while (Date.now() - t0 < 10000) {
+  while (performance.now() - t0 < 10000) {
     if (token !== scanToken) return { cancelled: true };
+
+    const a0 = performance.now();
     const d = await getDescriptor();
+    S.lat.push(performance.now() - a0);       // độ trễ của riêng lần quét này
+    S.attempts++;
+    S.hit.push(!!d);
+
     if (d) {
       seenFace = true;
+      S.faces++;
+      if (S.firstFaceMs === null) S.firstFaceMs = performance.now() - t0;
       const emp = matchEmployee(d);
       if (emp) {
         streak = (emp.id === streakId) ? streak + 1 : 1;
         streakId = emp.id;
-        if (streak >= 2) return { emp };
+        if (streak >= 2) {
+          S.matchMs = performance.now() - t0;
+          return { emp, stats: finishStats(S, t0, 'matched') };
+        }
       } else { streak = 0; streakId = null; }
     }
     await sleep(350);
   }
-  return { error: seenFace ? 'unknown' : 'noface' };
+  const outcome = seenFace ? 'unknown' : 'noface';
+  return { error: outcome, stats: finishStats(S, t0, outcome) };
 }
 const REASON = {
   noface: 'Không thấy khuôn mặt.',
@@ -483,6 +532,7 @@ async function doCheck(type) {
   try {
     const res = await recognise(token);
     if (res.cancelled || token !== scanToken) return;
+    lastStats = fmtStats(res.stats);
     if (res.error) return showResult({ ok: false, title: label + ' thất bại', sub: REASON[res.error] });
 
     const r = await api('logCheck', { id: res.emp.id, type });
