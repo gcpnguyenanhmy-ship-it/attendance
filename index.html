@@ -238,7 +238,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbxsNhqAJFi3AcGmBFHFlpLDeLladtFfSRtbJfJ79rMqPTgZwTbW3PMk51aufgfbwFaA/exec';
 // Muốn tự host model: tải thư mục model về cùng chỗ với index.html rồi đổi thành 'model/'
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
-const THRESHOLD = 0.5;
+const THRESHOLD = 0.5;      // nếu báo "Không nhận ra khuôn mặt" nhiều, thử 0.55 - 0.6
 const TZ = 'Asia/Ho_Chi_Minh';
 /* ==================================================== */
 
@@ -248,6 +248,9 @@ let stream = null;
 let scanToken = 0;         // đổi số này để hủy các vòng quét đang chạy
 let lastAction = null;
 let autoClose = null;
+
+// Bộ phát hiện mặt: mặc định SSD (chính xác). Nếu thiết bị không có WebGL sẽ tự đổi sang Tiny (nhanh) trong init()
+let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 });
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -361,10 +364,22 @@ async function loadData() {
 }
 
 /* ---------- Camera ---------- */
+const videoReady = v => v.readyState >= 2 && v.videoWidth > 0;
+
 async function startCamera() {
   stopCamera();
-  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-  $('v').srcObject = stream;
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+    audio: false
+  });
+  const v = $('v');
+  v.srcObject = stream;
+  // đợi tới khi có khung hình thật (tối đa 5 giây)
+  await Promise.race([
+    new Promise(res => { if (videoReady(v)) res(); else v.onloadeddata = () => res(); }),
+    sleep(5000)
+  ]);
+  try { await v.play(); } catch (e) {}
 }
 function stopCamera() {
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
@@ -412,7 +427,9 @@ function showResult(r) {      // r = {ok, kind: 'in'|'out', title, sub}
 
 /* ---------- Nhận diện ---------- */
 async function getDescriptor() {
-  const r = await faceapi.detectSingleFace($('v')).withFaceLandmarks().withFaceDescriptor();
+  const v = $('v');
+  if (!videoReady(v)) return null;
+  const r = await faceapi.detectSingleFace(v, DET_OPTS).withFaceLandmarks().withFaceDescriptor();
   return r ? r.descriptor : null;
 }
 function matchEmployee(d) {
@@ -576,7 +593,17 @@ async function init() {
   }
   render();
 
-  await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+  await faceapi.tf.ready();
+  const backend = faceapi.tf.getBackend();
+  console.log('TF backend:', backend);          // nên là "webgl"
+
+  if (backend === 'webgl') {
+    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+  } else {
+    // Không có WebGL: dùng bộ phát hiện nhẹ để quét kịp trong 10 giây
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    DET_OPTS = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+  }
   await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
   await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
   ready = true;
