@@ -155,7 +155,7 @@
 
 <header class="header">
   <div class="in">
-    <div class="title">Chấm công</div>
+    <div class="title">Attendance App</div>
     <div class="when">
       <div id="clock" class="clock">--:--</div>
       <div id="date" class="date">&nbsp;</div>
@@ -164,14 +164,14 @@
 </header>
 
 <main>
-  <p id="listNote" class="note">Đang tải...</p>
+  <p id="listNote" class="note">Loading...</p>
   <ul id="list"></ul>
-  <button id="openReg" class="add" type="button" aria-label="Đăng ký nhân viên" title="Đăng ký nhân viên">+</button>
+  <button id="openReg" class="add" type="button" aria-label="Register New Member" title="Register New Member">+</button>
 </main>
 
 <div class="actions">
   <div class="in">
-    <p id="actNote" class="actNote">Đang tải...</p>
+    <p id="actNote" class="actNote">Loading...</p>
     <div class="btns">
       <button id="btnIn" class="big cin" disabled>Check in</button>
       <button id="btnOut" class="big cout" disabled>Check out</button>
@@ -199,8 +199,8 @@
         <p id="resStats" class="stats"></p>
       </div>
       <div id="resBtns" class="two">
-        <button id="retry" class="solid" type="button">Thử lại</button>
-        <button id="done" class="ghost" type="button">Đóng</button>
+        <button id="retry" class="solid" type="button">Retry</button>
+        <button id="done" class="ghost" type="button">Close</button>
       </div>
     </div>
   </div>
@@ -211,13 +211,13 @@
   <div class="dlg">
     <h2>Đăng ký</h2>
     <form id="regForm" class="reg" autocomplete="off">
-      <input id="pin" type="password" placeholder="Mã PIN quản trị">
-      <input id="rid" placeholder="Mã nhân viên">
-      <input id="rname" placeholder="Họ tên">
+      <input id="pin" type="password" placeholder="Admin password">
+      <input id="rid" placeholder="Member code">
+      <input id="rname" placeholder="Name">
       <p id="regMsg" class="regMsg"></p>
       <div class="two">
-        <button id="regCancel" class="ghost" type="button">Hủy</button>
-        <button class="solid" type="submit">Mở camera</button>
+        <button id="regCancel" class="ghost" type="button">Cancel</button>
+        <button class="solid" type="submit">Open camera</button>
       </div>
     </form>
   </div>
@@ -226,11 +226,11 @@
 <!-- Nhập mã thiết bị (chỉ hỏi lần đầu trên mỗi thiết bị) -->
 <dialog id="tokDlg">
   <div class="dlg">
-    <h2>Mã thiết bị</h2>
+    <h2>Device code</h2>
     <form id="tokForm" class="reg" autocomplete="off">
-      <input id="tokInput" type="password" placeholder="Nhập mã thiết bị">
+      <input id="tokInput" type="password" placeholder="Enter device code">
       <p id="tokMsg" class="regMsg"></p>
-      <button class="solid" type="submit">Lưu</button>
+      <button class="solid" type="submit">Save</button>
     </form>
   </div>
 </dialog>
@@ -302,7 +302,7 @@ async function api(action, data = {}) {
       body: JSON.stringify({ token: getToken(), action, ...data })
     });
   } catch (e) {
-    throw new Error('Không kết nối được máy chủ.');
+    throw new Error('Can not connect to the server.');
   }
   let j;
   try { j = await res.json(); }
@@ -310,7 +310,7 @@ async function api(action, data = {}) {
   if (!j.ok) {
     if (j.error === 'UNAUTHORIZED') {
       clearToken();
-      const err = new Error('Mã thiết bị không đúng. Tải lại trang để nhập lại.');
+      const err = new Error('Incorrect Device code. Please try again');
       err.code = 'UNAUTHORIZED';
       throw err;
     }
@@ -331,8 +331,8 @@ keepAwake();
 /* ---------- Đồng hồ ---------- */
 function tick() {
   const now = new Date();
-  $('clock').textContent = now.toLocaleTimeString('vi-VN', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
-  $('date').textContent = now.toLocaleDateString('vi-VN', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long' });
+  $('clock').textContent = now.toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+  $('date').textContent = now.toLocaleDateString('en-GB', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long' });
 }
 setInterval(tick, 1000); tick();
 
