@@ -262,7 +262,7 @@ let autoClose = null;
 let lastStats = '';        // chuỗi số liệu đo của lần quét gần nhất
 
 // Bộ phát hiện mặt: mặc định SSD (chính xác). Nếu thiết bị không có WebGL sẽ tự đổi sang Tiny (nhanh) trong init()
-let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 });
+let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 });
 let DET_NAME = 'ssd';
 
 const $ = id => document.getElementById(id);
@@ -687,7 +687,7 @@ $('regForm').addEventListener('submit', async ev => {
 });
 
 /* ---------- Đăng ký nhiều góc mặt ---------- */
-const FRONT_SAMPLES = 8;        // số mẫu khi nhìn thẳng (góc dùng nhiều nhất nên lấy nhiều hơn)
+const FRONT_SAMPLES = 4;        // số mẫu khi nhìn thẳng (góc dùng nhiều nhất nên lấy nhiều hơn)
 const SIDE_SAMPLES = 2;         // số mẫu mỗi bên trái / phải. Tổng vector = FRONT + 2 x SIDE, không vượt giới hạn của backend (hiện 15)
 const POSE_TIMEOUT = 20000;     // thời gian tối đa cho mỗi góc (ms)
 const YAW_FRONT = 0.06;         // lệch tối đa khi nhìn thẳng
@@ -1003,7 +1003,7 @@ async function init() {
   } else {
     // Không có WebGL: dùng bộ phát hiện nhẹ để quét kịp trong 10 giây
     await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-    DET_OPTS = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+    DET_OPTS = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.6 });
     DET_NAME = 'tiny';
   }
   await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
