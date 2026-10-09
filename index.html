@@ -243,7 +243,7 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbxsNhqAJFi3AcGmBFHFlpLDeLladtFfSRtbJfJ79rMqPTgZwTbW3PMk51aufgfbwFaA/exec';
 // Muốn tự host model: tải thư mục model về cùng chỗ với index.html rồi đổi thành 'model/'
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
-const THRESHOLD = 0.5;      // nếu báo "Không nhận ra khuôn mặt" nhiều, thử 0.55 - 0.6
+const THRESHOLD = 0.7;      // nếu báo "Không nhận ra khuôn mặt" nhiều, thử 0.55 - 0.6
 const TZ = 'Asia/Ho_Chi_Minh';
 // true: hộp thoại kết quả KHÔNG tự đóng để kịp đọc số liệu khi test trên điện thoại. Dùng thật thì đổi thành false.
 const DEBUG_STATS = true;
@@ -262,7 +262,7 @@ let autoClose = null;
 let lastStats = '';        // chuỗi số liệu đo của lần quét gần nhất
 
 // Bộ phát hiện mặt: mặc định SSD (chính xác). Nếu thiết bị không có WebGL sẽ tự đổi sang Tiny (nhanh) trong init()
-let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.6 });
+let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.7 });
 let DET_NAME = 'ssd';
 
 const $ = id => document.getElementById(id);
@@ -1003,7 +1003,7 @@ async function init() {
   } else {
     // Không có WebGL: dùng bộ phát hiện nhẹ để quét kịp trong 10 giây
     await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-    DET_OPTS = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.6 });
+    DET_OPTS = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.7 });
     DET_NAME = 'tiny';
   }
   await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
