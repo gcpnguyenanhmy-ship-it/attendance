@@ -243,12 +243,12 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbxsNhqAJFi3AcGmBFHFlpLDeLladtFfSRtbJfJ79rMqPTgZwTbW3PMk51aufgfbwFaA/exec';
 // Muốn tự host model: tải thư mục model về cùng chỗ với index.html rồi đổi thành 'model/'
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
-const THRESHOLD = 0.7;      // nếu báo "Không nhận ra khuôn mặt" nhiều, thử 0.55 - 0.6
+const THRESHOLD = 0.4;      // nếu báo "Không nhận ra khuôn mặt" nhiều, thử 0.55 - 0.6
 const TZ = 'Asia/Ho_Chi_Minh';
 // true: hộp thoại kết quả KHÔNG tự đóng để kịp đọc số liệu khi test trên điện thoại. Dùng thật thì đổi thành false.
 const DEBUG_STATS = true;
 // true: luôn dùng TinyFaceDetector (nhanh hơn nhiều trên tablet/điện thoại). false: dùng SSD khi có WebGL.
-const FORCE_TINY = false;
+const FORCE_TINY = true;
 const WARMUP_MS = 300;      // chờ trước lần quét đầu tiên (để camera ổn định phơi sáng/lấy nét). Trước đây: 700
 const SCAN_GAP_MS = 100;    // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
 /* ==================================================== */
