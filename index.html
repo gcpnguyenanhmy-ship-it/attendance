@@ -133,6 +133,7 @@
   .res p{margin:6px 0 0; color:var(--muted); font-size:16px; overflow-wrap:anywhere}
   .res p.stats{margin-top:14px; font-size:12px; line-height:1.5; color:var(--muted); font-variant-numeric:tabular-nums}
   .res p.stats:empty{display:none}
+  #resSub{white-space:pre-line}
   #resBtns{margin-top:18px}
   .tick{stroke-dasharray:60; stroke-dashoffset:60; animation:draw .5s .12s ease forwards}
   @keyframes draw{to{stroke-dashoffset:0}}
@@ -167,6 +168,7 @@
   <p id="listNote" class="note">Loading...</p>
   <ul id="list"></ul>
   <button id="openReg" class="add" type="button" aria-label="Register New Member" title="Register New Member">+</button>
+  <button id="bench" class="quiet" type="button" hidden>Run benchmark</button>
 </main>
 
 <div class="actions">
@@ -247,7 +249,7 @@ const TZ = 'Asia/Ho_Chi_Minh';
 const DEBUG_STATS = true;
 // true: luôn dùng TinyFaceDetector (nhanh hơn nhiều trên tablet/điện thoại). false: dùng SSD khi có WebGL.
 const FORCE_TINY = true;
-const WARMUP_MS = 300;      // chờ trước lần quét đầu tiên. Trước đây: 700
+const WARMUP_MS = 100;      // chờ trước lần quét đầu tiên (để camera ổn định phơi sáng/lấy nét). Trước đây: 700
 const SCAN_GAP_MS = 100;    // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
 /* ==================================================== */
 
@@ -295,7 +297,8 @@ function askToken(msg) {
 $('tokDlg').addEventListener('cancel', ev => ev.preventDefault());   // không cho đóng bằng phím Esc
 
 /* ---------- Gọi Apps Script ---------- */
-async function api(action, data = {}) {
+async function apiTimed(action, data = {}) {
+  const tReq = performance.now();
   let res;
   try {
     res = await fetch(API_URL, {
@@ -318,8 +321,10 @@ async function api(action, data = {}) {
     }
     throw new Error(j.error || 'Unknown error.');
   }
-  return j.data;
+  // rtMs: tổng thời gian khứ hồi; serverMs: thời gian chạy bên trong Apps Script (backend trả về)
+  return { data: j.data, rtMs: Math.round(performance.now() - tReq), serverMs: (typeof j.serverMs === 'number') ? j.serverMs : null };
 }
+const api = async (action, data) => (await apiTimed(action, data)).data;
 
 /* ---------- Giữ màn hình luôn sáng (cho tablet) ---------- */
 async function keepAwake() {
@@ -499,18 +504,21 @@ function finishStats(S, t0, outcome) {
   console.table(lat.map((ms, i) => ({ scan: i + 1, detectMs: Math.round(ms), faceFound: S.hit[i] ? 'yes' : 'no', distance: S.dists[i] })));
   return st;
 }
-function fmtStats(s) {
+function fmtStats(s, T) {
   if (!s) return '';
   const f = v => v === null ? '-' : v + 'ms';
   return `Scans: ${s.attempts} (${s.facesFound} with face) / ${s.totalMs}ms · ` +
     `avg latency ${s.avgLatMs}ms (${s.minLatMs}-${s.maxLatMs}) · ${s.scansPerSec}/s · ` +
     `first face at ${f(s.firstFaceMs)} · matched at ${f(s.matchMs)} · ` +
     `closest distance ${s.minDist === null ? '-' : s.minDist + (s.minName ? ' (' + s.minName + ')' : '')} / threshold ${s.threshold} · ` +
-    `${s.backend}/${s.detector} · per scan: ${s.dists.map(x => x === null ? '-' : x).join(', ')}`;
+    `${s.backend}/${s.detector} · per scan: ${s.dists.map(x => x === null ? '-' : x).join(', ')}` +
+    (T ? ` · camera ${T.camMs}ms` +
+         (T.logRtMs != null ? ` · logCheck ${T.logRtMs}ms (server ${T.logServerMs == null ? '-' : T.logServerMs + 'ms'})` : '') +
+         ` · total ${T.totalUiMs}ms` : '');
 }
 
 // Gửi số liệu quét về Apps Script để ghi vào tab Metrics (không chặn giao diện, lỗi thì bỏ qua)
-function sendMetrics(type, res) {
+function sendMetrics(type, res, T) {
   const s = res && res.stats;
   if (!s) return;
   const emp = res.emp || null;
@@ -533,7 +541,11 @@ function sendMetrics(type, res) {
     scansDetail: s.scansDetail,
     backend: s.backend,
     detector: s.detector,
-    device: (navigator.userAgent || '').slice(0, 120)
+    device: (navigator.userAgent || '').slice(0, 120),
+    camMs: T ? T.camMs : null,                 // thời gian mở camera
+    logRtMs: T ? T.logRtMs : null,             // logCheck: tổng thời gian khứ hồi
+    logServerMs: T ? T.logServerMs : null,     // logCheck: thời gian chạy trong Apps Script
+    totalUiMs: T ? T.totalUiMs : null          // từ lúc bấm nút đến lúc có kết quả
   }).catch(e => console.warn('logMetrics failed:', errText(e)));
 }
 
@@ -583,6 +595,7 @@ const REASON = {
 async function doCheck(type) {
   const label = type === 'IN' ? 'Check in' : 'Check out';
   const token = ++scanToken;
+  const tBtn = performance.now();               // mốc bắt đầu: lúc bấm nút
   lastAction = () => doCheck(type);
   openScan(label, 'Look straight at the camera.');
 
@@ -592,17 +605,24 @@ async function doCheck(type) {
   } catch (e) {
     return showResult({ ok: false, title: label + ' Fail', sub: cameraReason() });
   }
+  const camMs = Math.round(performance.now() - tBtn);   // thời gian mở camera
 
   try {
     const res = await recognise(token);
     if (res.cancelled || token !== scanToken) return;
-    lastStats = fmtStats(res.stats);
-    sendMetrics(type, res);
-    if (res.error) return showResult({ ok: false, title: label + ' Fail', sub: REASON[res.error] });
+    if (res.error) {
+      const T = { camMs, totalUiMs: Math.round(performance.now() - tBtn) };
+      lastStats = fmtStats(res.stats, T);
+      sendMetrics(type, res, T);
+      return showResult({ ok: false, title: label + ' Fail', sub: REASON[res.error] });
+    }
 
-    const r = await api('logCheck', { id: res.emp.id, type });
+    const call = await apiTimed('logCheck', { id: res.emp.id, type });
     if (token !== scanToken) return;
-    handleLog(res.emp, type, label, r);
+    const T = { camMs, logRtMs: call.rtMs, logServerMs: call.serverMs, totalUiMs: Math.round(performance.now() - tBtn) };
+    lastStats = fmtStats(res.stats, T);
+    sendMetrics(type, res, T);          // gửi sau logCheck để hai lệnh không tranh khóa trên Apps Script
+    handleLog(res.emp, type, label, call.data);
   } catch (e) {
     showResult({ ok: false, title: label + ' Fail', sub: errText(e) });
   }
@@ -647,8 +667,8 @@ $('regForm').addEventListener('submit', async ev => {
 });
 
 /* ---------- Đăng ký nhiều góc mặt ---------- */
-const FRONT_SAMPLES = 8;
-const SIDE_SAMPLES = 2;     // số mẫu mỗi góc 8 thẳng, 2 nghiêng/trái, phải
+const FRONT_SAMPLES = 8;        // số mẫu khi nhìn thẳng (góc dùng nhiều nhất nên lấy nhiều hơn)
+const SIDE_SAMPLES = 2;         // số mẫu mỗi bên trái / phải. Tổng vector = FRONT + 2 x SIDE, không vượt giới hạn của backend (hiện 15)
 const POSE_TIMEOUT = 20000;     // thời gian tối đa cho mỗi góc (ms)
 const YAW_FRONT = 0.06;         // lệch tối đa khi nhìn thẳng
 const YAW_SIDE_MIN = 0.10;      // lệch tối thiểu khi xoay trái/phải (nhỏ hơn: coi như chưa xoay đủ)
@@ -667,8 +687,8 @@ function yawOf(landmarks) {
 
 const POSES = [
   { name: 'Front', count: FRONT_SAMPLES, hint: 'Look straight at the camera and hold still.', ok: y => Math.abs(y) <= YAW_FRONT },
-  { name: 'Left',  count: SIDE_SAMPLES,  hint: 'Turn your head slightly to the LEFT (toward the left of the screen).', ok: y => y >= YAW_SIDE_MIN && y <= YAW_SIDE_MAX },
-  { name: 'Right', count: SIDE_SAMPLES,  hint: 'Turn your head slightly to the RIGHT (toward the right of the screen).', ok: y => y <= -YAW_SIDE_MIN && y >= -YAW_SIDE_MAX }
+  { name: 'Left',  count: SIDE_SAMPLES, hint: 'Turn your head slightly to the LEFT (toward the left of the screen).', ok: y => y >= YAW_SIDE_MIN && y <= YAW_SIDE_MAX },
+  { name: 'Right', count: SIDE_SAMPLES, hint: 'Turn your head slightly to the RIGHT (toward the right of the screen).', ok: y => y <= -YAW_SIDE_MIN && y >= -YAW_SIDE_MAX }
 ];
 
 // Trả về { samples } (mỗi mẫu là 1 vector 128 chiều), hoặc { cancelled }, hoặc { error: 'thông báo' }
@@ -738,6 +758,78 @@ async function doRegister(id, name, pin) {
   }
 }
 
+/* ---------- Benchmark: đo riêng từng khâu (chỉ hiện nút khi DEBUG_STATS = true) ---------- */
+const avgOf = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : 0;
+
+async function runBenchmark() {
+  const token = ++scanToken;
+  lastAction = runBenchmark;
+  openScan('Benchmark', 'Look straight at the camera. Measuring...');
+
+  const tCam = performance.now();
+  try {
+    await startCamera();
+    if (token !== scanToken) return stopCamera();
+  } catch (e) {
+    return showResult({ ok: false, title: 'Benchmark Fail', sub: cameraReason() });
+  }
+  const camMs = Math.round(performance.now() - tCam);
+
+  try {
+    await sleep(WARMUP_MS);
+    const v = $('v');
+    await detectFull();                          // chạy 1 lần để làm nóng (lần đầu thường chậm do biên dịch shader WebGL)
+
+    // Mỗi vòng chạy 3 chuỗi: [phát hiện], [phát hiện + điểm mốc], [phát hiện + điểm mốc + vector]
+    // rồi lấy hiệu để suy ra thời gian của từng bước.
+    const T = { det: [], lmk: [], full: [] };
+    for (let tries = 0; tries < 20 && T.det.length < 6; tries++) {
+      if (token !== scanToken) return;
+      let a = performance.now();
+      const r1 = await faceapi.detectSingleFace(v, DET_OPTS);
+      const dDet = performance.now() - a;
+      if (!r1) { await sleep(200); continue; }
+
+      a = performance.now();
+      await faceapi.detectSingleFace(v, DET_OPTS).withFaceLandmarks();
+      const dLmk = performance.now() - a;
+
+      a = performance.now();
+      await faceapi.detectSingleFace(v, DET_OPTS).withFaceLandmarks().withFaceDescriptor();
+      const dFull = performance.now() - a;
+
+      T.det.push(dDet); T.lmk.push(dLmk); T.full.push(dFull);
+    }
+    if (T.det.length < 3) return showResult({ ok: false, title: 'Benchmark Fail', sub: REASON.noface });
+
+    const det = avgOf(T.det);
+    const lmk = Math.max(0, avgOf(T.lmk) - det);
+    const desc = Math.max(0, avgOf(T.full) - avgOf(T.lmk));
+
+    // Apps Script: gọi 3 lần mỗi loại để thấy lần đầu (có thể bị "nguội") so với các lần sau
+    const ping = [], stat = [];
+    for (let i = 0; i < 3; i++) ping.push(await apiTimed('ping'));
+    for (let i = 0; i < 3; i++) stat.push(await apiTimed('getStatuses'));
+    if (token !== scanToken) return;
+    const fmtCalls = c => `${c.map(x => x.rtMs).join(', ')} ms  |  server: ${c.map(x => x.serverMs == null ? '-' : x.serverMs).join(', ')} ms`;
+
+    const lines = [
+      `Camera open: ${camMs} ms`,
+      `Face detection (${DET_NAME}): ${det} ms`,
+      `Landmarks (68 points): ${lmk} ms`,
+      `Descriptor (128 values): ${desc} ms`,
+      `Total per scan: ${avgOf(T.full)} ms  (${T.det.length} runs, ${faceapi.tf.getBackend()})`,
+      `Ping round trip: ${fmtCalls(ping)}`,
+      `getStatuses round trip: ${fmtCalls(stat)}`
+    ];
+    console.log('BENCHMARK\n' + lines.join('\n'));
+    showResult({ ok: true, kind: 'in', title: 'Benchmark', sub: lines.join('\n') });
+  } catch (e) {
+    showResult({ ok: false, title: 'Benchmark Fail', sub: errText(e) });
+  }
+}
+$('bench').addEventListener('click', runBenchmark);
+
 /* ---------- Khởi động ---------- */
 async function init() {
   if (!API_URL || API_URL.indexOf('DAN_URL') === 0) {
@@ -774,6 +866,7 @@ async function init() {
   $('btnIn').disabled = false;
   $('btnOut').disabled = false;
   $('actNote').hidden = true;
+  if (DEBUG_STATS) $('bench').hidden = false;
 
   // Mỗi 60 giây cập nhật trạng thái; mỗi 10 phút tải lại cả danh sách (nhận người mới đăng ký ở thiết bị khác)
   let n = 0;
