@@ -243,6 +243,10 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbxsNhqAJFi3AcGmBFHFlpLD
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
 const THRESHOLD = 0.5;      // nếu báo "Không nhận ra khuôn mặt" nhiều, thử 0.55 - 0.6
 const TZ = 'Asia/Ho_Chi_Minh';
+// true: hộp thoại kết quả KHÔNG tự đóng để kịp đọc số liệu khi test trên điện thoại. Dùng thật thì đổi thành false.
+const DEBUG_STATS = true;
+// true: luôn dùng TinyFaceDetector (nhanh hơn nhiều trên tablet/điện thoại). false: dùng SSD khi có WebGL.
+const FORCE_TINY = true;
 /* ==================================================== */
 
 let employees = [];        // {id, name, desc, status: {type,time} | null}
@@ -255,6 +259,7 @@ let lastStats = '';        // chuỗi số liệu đo của lần quét gần nh
 
 // Bộ phát hiện mặt: mặc định SSD (chính xác). Nếu thiết bị không có WebGL sẽ tự đổi sang Tiny (nhanh) trong init()
 let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 });
+let DET_NAME = 'ssd';
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -359,11 +364,16 @@ function applyStatuses(map) {
   employees.forEach(e => e.status = map[e.id] || null);
   render();
 }
+// Dữ liệu khuôn mặt có thể là 1 vector (dạng cũ) hoặc nhiều vector (dạng mới, mỗi góc mặt một vector)
+const parseDescs = s => {
+  const a = JSON.parse(s);
+  return (Array.isArray(a[0]) ? a : [a]).map(v => new Float32Array(v));
+};
 async function loadData() {
   const list = await api('getEmployees');
   employees = list.map(e => ({
     id: e.id, name: e.name, status: e.status,
-    desc: new Float32Array(JSON.parse(e.desc))
+    descs: parseDescs(e.desc)
   }));
 }
 
@@ -428,23 +438,34 @@ function showResult(r) {      // r = {ok, kind: 'in'|'out', title, sub}
   $('done').className = r.ok ? 'quiet' : 'ghost';
   $('done').textContent = 'Đóng';
   clearTimeout(autoClose);
-  if (r.ok) autoClose = setTimeout(closeScan, 2600);
+  if (r.ok && !DEBUG_STATS) autoClose = setTimeout(closeScan, 2600);
 }
 
 /* ---------- Nhận diện ---------- */
-async function getDescriptor() {
+async function detectFull() {          // trả về { descriptor, landmarks, ... } hoặc null
   const v = $('v');
   if (!videoReady(v)) return null;
   const r = await faceapi.detectSingleFace(v, DET_OPTS).withFaceLandmarks().withFaceDescriptor();
+  return r || null;
+}
+async function getDescriptor() {
+  const r = await detectFull();
   return r ? r.descriptor : null;
 }
-function matchEmployee(d) {
+// Trả về người gần nhất và khoảng cách tới họ (dù có vượt THRESHOLD hay không)
+function bestMatch(d) {
   let best = null, bestDist = 9;
   employees.forEach(e => {
-    const dist = faceapi.euclideanDistance(d, e.desc);
+    // khoảng cách tới một nhân viên = góc mặt gần nhất trong các mẫu đã lưu
+    let dist = 9;
+    e.descs.forEach(v => { const x = faceapi.euclideanDistance(d, v); if (x < dist) dist = x; });
     if (dist < bestDist) { bestDist = dist; best = e; }
   });
-  return bestDist <= THRESHOLD ? best : null;
+  return { emp: best, dist: bestDist };
+}
+function matchEmployee(d) {
+  const m = bestMatch(d);
+  return m.dist <= THRESHOLD ? m.emp : null;
 }
 // Thử nhận diện tối đa 10 giây; cần khớp cùng một người 2 lần liên tiếp mới chấp nhận
 // Tổng hợp số liệu đo được của một phiên quét
@@ -463,10 +484,17 @@ function finishStats(S, t0, outcome) {
     avgLatMs: lat.length ? Math.round(sum / lat.length) : 0,                  // độ trễ trung bình 1 lần quét
     minLatMs: lat.length ? Math.round(Math.min(...lat)) : 0,
     maxLatMs: lat.length ? Math.round(Math.max(...lat)) : 0,
-    scansPerSec: +(S.attempts / ((now - t0) / 1000)).toFixed(2)
+    scansPerSec: +(S.attempts / ((now - t0) / 1000)).toFixed(2),
+    minDist: S.minDist === null ? null : +S.minDist.toFixed(3),   // khoảng cách nhỏ nhất đo được (so với THRESHOLD)
+    minName: S.minName,
+    threshold: THRESHOLD,
+    dists: S.dists,
+    detector: DET_NAME,
+    // "1: 874ms / 0.47; 2: 752ms / -; ..." (mỗi lần quét: độ trễ / khoảng cách)
+    scansDetail: lat.map((ms, i) => `${i + 1}: ${Math.round(ms)}ms / ${S.dists[i] === null ? '-' : S.dists[i]}`).join('; ')
   };
   console.log('SCAN STATS', st);
-  console.table(lat.map((ms, i) => ({ lan: i + 1, detectMs: Math.round(ms), thayMat: S.hit[i] ? 'có' : 'không' })));
+  console.table(lat.map((ms, i) => ({ lan: i + 1, detectMs: Math.round(ms), thayMat: S.hit[i] ? 'có' : 'không', khoangCach: S.dists[i] })));
   return st;
 }
 function fmtStats(s) {
@@ -474,12 +502,42 @@ function fmtStats(s) {
   const f = v => v === null ? '-' : v + 'ms';
   return `Quét ${s.attempts} lần (${s.facesFound} thấy mặt) / ${s.totalMs}ms · ` +
     `trễ TB ${s.avgLatMs}ms (${s.minLatMs}-${s.maxLatMs}) · ${s.scansPerSec}/giây · ` +
-    `thấy mặt lúc ${f(s.firstFaceMs)} · nhận ra lúc ${f(s.matchMs)} · ${s.backend}`;
+    `thấy mặt lúc ${f(s.firstFaceMs)} · nhận ra lúc ${f(s.matchMs)} · ` +
+    `khoảng cách gần nhất ${s.minDist === null ? '-' : s.minDist + (s.minName ? ' (' + s.minName + ')' : '')} / ngưỡng ${s.threshold} · ` +
+    `${s.backend}/${s.detector} · từng lần: ${s.dists.map(x => x === null ? '-' : x).join(', ')}`;
+}
+
+// Gửi số liệu quét về Apps Script để ghi vào tab Metrics (không chặn giao diện, lỗi thì bỏ qua)
+function sendMetrics(type, res) {
+  const s = res && res.stats;
+  if (!s) return;
+  const emp = res.emp || null;
+  api('logMetrics', {
+    type,                                   // IN | OUT
+    outcome: s.outcome,                     // matched | unknown | noface
+    id: emp ? emp.id : '',
+    name: emp ? emp.name : '',
+    nearest: s.minName || '',               // người gần nhất (kể cả khi không khớp)
+    totalMs: s.totalMs,
+    attempts: s.attempts,
+    facesFound: s.facesFound,
+    avgLatMs: s.avgLatMs,
+    minLatMs: s.minLatMs,
+    maxLatMs: s.maxLatMs,
+    firstFaceMs: s.firstFaceMs,
+    matchMs: s.matchMs,
+    minDist: s.minDist,
+    threshold: s.threshold,
+    scansDetail: s.scansDetail,
+    backend: s.backend,
+    detector: s.detector,
+    device: (navigator.userAgent || '').slice(0, 120)
+  }).catch(e => console.warn('logMetrics lỗi:', errText(e)));
 }
 
 async function recognise(token) {
   const t0 = performance.now();
-  const S = { attempts: 0, faces: 0, lat: [], hit: [], firstFaceMs: null, matchMs: null };
+  const S = { attempts: 0, faces: 0, lat: [], hit: [], firstFaceMs: null, matchMs: null, dists: [], minDist: null, minName: '' };
   let seenFace = false, streakId = null, streak = 0;
   await sleep(700);
   while (performance.now() - t0 < 10000) {
@@ -490,12 +548,16 @@ async function recognise(token) {
     S.lat.push(performance.now() - a0);       // độ trễ của riêng lần quét này
     S.attempts++;
     S.hit.push(!!d);
+    S.dists.push(null);                        // khoảng cách của lần quét này (null nếu không thấy mặt)
 
     if (d) {
       seenFace = true;
       S.faces++;
       if (S.firstFaceMs === null) S.firstFaceMs = performance.now() - t0;
-      const emp = matchEmployee(d);
+      const m = bestMatch(d);
+      S.dists[S.dists.length - 1] = +m.dist.toFixed(3);
+      if (S.minDist === null || m.dist < S.minDist) { S.minDist = m.dist; S.minName = m.emp ? m.emp.name : ''; }
+      const emp = m.dist <= THRESHOLD ? m.emp : null;
       if (emp) {
         streak = (emp.id === streakId) ? streak + 1 : 1;
         streakId = emp.id;
@@ -533,6 +595,7 @@ async function doCheck(type) {
     const res = await recognise(token);
     if (res.cancelled || token !== scanToken) return;
     lastStats = fmtStats(res.stats);
+    sendMetrics(type, res);
     if (res.error) return showResult({ ok: false, title: label + ' thất bại', sub: REASON[res.error] });
 
     const r = await api('logCheck', { id: res.emp.id, type });
@@ -581,19 +644,65 @@ $('regForm').addEventListener('submit', async ev => {
   doRegister(id, name, pin);
 });
 
-async function captureSamples(token) {
-  const samples = [], t0 = Date.now();
+/* ---------- Đăng ký nhiều góc mặt ---------- */
+const SAMPLES_PER_POSE = 2;     // số mẫu mỗi góc
+const POSE_TIMEOUT = 20000;     // thời gian tối đa cho mỗi góc (ms)
+const YAW_FRONT = 0.06;         // lệch tối đa khi nhìn thẳng
+const YAW_SIDE_MIN = 0.10;      // lệch tối thiểu khi xoay trái/phải (nhỏ hơn: coi như chưa xoay đủ)
+const YAW_SIDE_MAX = 0.30;      // lệch tối đa (xoay quá nhiều thì mẫu không dùng được)
+const FLIP_YAW = false;         // nếu thấy hướng trái/phải bị ngược, đổi thành true
+
+// Ước lượng độ xoay ngang từ 68 điểm mốc: so vị trí đầu mũi (điểm 30) với hai đầu đường hàm (điểm 0 và 16).
+// Giá trị dương = mặt quay sang TRÁI màn hình (màn hình đang lật gương), âm = sang PHẢI, gần 0 = nhìn thẳng.
+function yawOf(landmarks) {
+  const p = landmarks.positions;
+  const w = p[16].x - p[0].x;
+  if (!w) return 0;
+  const r = (p[30].x - p[0].x) / w;          // khoảng 0.5 khi nhìn thẳng
+  return (FLIP_YAW ? -1 : 1) * (r - 0.5);
+}
+
+const POSES = [
+  { name: 'Nhìn thẳng', hint: 'Nhìn thẳng vào camera, giữ yên mặt.', ok: y => Math.abs(y) <= YAW_FRONT },
+  { name: 'Xoay trái',  hint: 'Xoay mặt nhẹ sang TRÁI (về phía trái màn hình).', ok: y => y >= YAW_SIDE_MIN && y <= YAW_SIDE_MAX },
+  { name: 'Xoay phải',  hint: 'Xoay mặt nhẹ sang PHẢI (về phía phải màn hình).', ok: y => y <= -YAW_SIDE_MIN && y >= -YAW_SIDE_MAX }
+];
+
+// Trả về { samples } (mỗi mẫu là 1 vector 128 chiều), hoặc { cancelled }, hoặc { error: 'thông báo' }
+async function capturePoses(token) {
+  const samples = [];
   await sleep(700);
-  while (samples.length < 3 && Date.now() - t0 < 15000) {
-    if (token !== scanToken) return null;
-    const d = await getDescriptor();
-    if (d) {
-      samples.push(d);
-      $('camHint').textContent = `Đã chụp ${samples.length}/3`;
-      await sleep(500);
-    } else await sleep(300);
+  for (let i = 0; i < POSES.length; i++) {
+    const pose = POSES[i];
+    const label = `Bước ${i + 1}/${POSES.length}: ${pose.hint}`;
+    let got = 0;
+    const t0 = Date.now();
+    $('camHint').textContent = label;
+    while (got < SAMPLES_PER_POSE && Date.now() - t0 < POSE_TIMEOUT) {
+      if (token !== scanToken) return { cancelled: true };
+      const r = await detectFull();
+      if (r) {
+        const y = yawOf(r.landmarks);
+        console.log(`[đăng ký] ${pose.name}: yaw=${y.toFixed(3)}`);   // xem số này để chỉnh YAW_* nếu cần
+        if (pose.ok(y)) {
+          samples.push(r.descriptor);
+          got++;
+          $('camHint').textContent = `${label} (${got}/${SAMPLES_PER_POSE})`;
+          await sleep(500);
+          continue;
+        }
+      }
+      await sleep(250);
+    }
+    if (got < SAMPLES_PER_POSE) {
+      return { error: `Không chụp được góc "${pose.name}". Hãy xoay nhẹ đúng hướng và thử lại.` };
+    }
+    if (i < POSES.length - 1) {
+      $('camHint').textContent = 'Tốt. Chuẩn bị bước tiếp theo...';
+      await sleep(900);
+    }
   }
-  return samples;
+  return { samples };
 }
 
 async function doRegister(id, name, pin) {
@@ -609,14 +718,14 @@ async function doRegister(id, name, pin) {
   }
 
   try {
-    const samples = await captureSamples(token);
-    if (samples === null || token !== scanToken) return;
-    if (samples.length < 3) return showResult({ ok: false, title: 'Đăng ký thất bại', sub: REASON.noface });
+    const cap = await capturePoses(token);
+    if (cap.cancelled || token !== scanToken) return;
+    if (cap.error) return showResult({ ok: false, title: 'Đăng ký thất bại', sub: cap.error });
 
-    const avg = new Float32Array(128);
-    samples.forEach(s => s.forEach((v, i) => avg[i] += v / 3));
-    await api('registerEmployee', { id, name, descJson: JSON.stringify(Array.from(avg)), pin });
-    employees.push({ id, name, desc: avg, status: null });
+    // Lưu TỪNG vector riêng (làm tròn 4 chữ số cho gọn ô Sheet), không lấy trung bình
+    const vecs = cap.samples.map(s => Array.from(s, v => +v.toFixed(4)));
+    await api('registerEmployee', { id, name, descJson: JSON.stringify(vecs), pin });
+    employees.push({ id, name, descs: vecs.map(v => new Float32Array(v)), status: null });
 
     $('regForm').reset();
     render(id);
@@ -647,12 +756,13 @@ async function init() {
   const backend = faceapi.tf.getBackend();
   console.log('TF backend:', backend);          // nên là "webgl"
 
-  if (backend === 'webgl') {
+  if (backend === 'webgl' && !FORCE_TINY) {
     await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
   } else {
     // Không có WebGL: dùng bộ phát hiện nhẹ để quét kịp trong 10 giây
     await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
     DET_OPTS = new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 });
+    DET_NAME = 'tiny';
   }
   await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
   await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
