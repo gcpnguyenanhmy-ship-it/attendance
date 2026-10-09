@@ -247,6 +247,8 @@ const TZ = 'Asia/Ho_Chi_Minh';
 const DEBUG_STATS = true;
 // true: luôn dùng TinyFaceDetector (nhanh hơn nhiều trên tablet/điện thoại). false: dùng SSD khi có WebGL.
 const FORCE_TINY = true;
+const WARMUP_MS = 300;      // chờ trước lần quét đầu tiên. Trước đây: 700
+const SCAN_GAP_MS = 100;    // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
 /* ==================================================== */
 
 let employees = [];        // {id, name, desc, status: {type,time} | null}
@@ -539,7 +541,7 @@ async function recognise(token) {
   const t0 = performance.now();
   const S = { attempts: 0, faces: 0, lat: [], hit: [], firstFaceMs: null, matchMs: null, dists: [], minDist: null, minName: '' };
   let seenFace = false, streakId = null, streak = 0;
-  await sleep(700);
+  await sleep(WARMUP_MS);
   while (performance.now() - t0 < 10000) {
     if (token !== scanToken) return { cancelled: true };
 
@@ -567,14 +569,14 @@ async function recognise(token) {
         }
       } else { streak = 0; streakId = null; }
     }
-    await sleep(350);
+    await sleep(SCAN_GAP_MS);
   }
   const outcome = seenFace ? 'unknown' : 'noface';
   return { error: outcome, stats: finishStats(S, t0, outcome) };
 }
 const REASON = {
   noface: 'No face detected.',
-  unknown: 'Face not recognized.'
+  unknown: 'Face not registered.'
 };
 
 /* ---------- Check in / Check out ---------- */
@@ -645,7 +647,8 @@ $('regForm').addEventListener('submit', async ev => {
 });
 
 /* ---------- Đăng ký nhiều góc mặt ---------- */
-const SAMPLES_PER_POSE = 2;     // số mẫu mỗi góc
+const FRONT_SAMPLES = 8;
+const SIDE_SAMPLES = 2;     // số mẫu mỗi góc 8 thẳng, 2 nghiêng/trái, phải
 const POSE_TIMEOUT = 20000;     // thời gian tối đa cho mỗi góc (ms)
 const YAW_FRONT = 0.06;         // lệch tối đa khi nhìn thẳng
 const YAW_SIDE_MIN = 0.10;      // lệch tối thiểu khi xoay trái/phải (nhỏ hơn: coi như chưa xoay đủ)
@@ -663,9 +666,9 @@ function yawOf(landmarks) {
 }
 
 const POSES = [
-  { name: 'Front', hint: 'Look straight at the camera and hold still.', ok: y => Math.abs(y) <= YAW_FRONT },
-  { name: 'Left',  hint: 'Turn your head slightly to the LEFT (toward the left of the screen).', ok: y => y >= YAW_SIDE_MIN && y <= YAW_SIDE_MAX },
-  { name: 'Right', hint: 'Turn your head slightly to the RIGHT (toward the right of the screen).', ok: y => y <= -YAW_SIDE_MIN && y >= -YAW_SIDE_MAX }
+  { name: 'Front', count: FRONT_SAMPLES, hint: 'Look straight at the camera and hold still.', ok: y => Math.abs(y) <= YAW_FRONT },
+  { name: 'Left',  count: SIDE_SAMPLES,  hint: 'Turn your head slightly to the LEFT (toward the left of the screen).', ok: y => y >= YAW_SIDE_MIN && y <= YAW_SIDE_MAX },
+  { name: 'Right', count: SIDE_SAMPLES,  hint: 'Turn your head slightly to the RIGHT (toward the right of the screen).', ok: y => y <= -YAW_SIDE_MIN && y >= -YAW_SIDE_MAX }
 ];
 
 // Trả về { samples } (mỗi mẫu là 1 vector 128 chiều), hoặc { cancelled }, hoặc { error: 'thông báo' }
@@ -678,7 +681,7 @@ async function capturePoses(token) {
     let got = 0;
     const t0 = Date.now();
     $('camHint').textContent = label;
-    while (got < SAMPLES_PER_POSE && Date.now() - t0 < POSE_TIMEOUT) {
+    while (got < pose.count && Date.now() - t0 < POSE_TIMEOUT) {
       if (token !== scanToken) return { cancelled: true };
       const r = await detectFull();
       if (r) {
@@ -687,14 +690,14 @@ async function capturePoses(token) {
         if (pose.ok(y)) {
           samples.push(r.descriptor);
           got++;
-          $('camHint').textContent = `${label} (${got}/${SAMPLES_PER_POSE})`;
+          $('camHint').textContent = `${label} (${got}/${pose.count})`;
           await sleep(500);
           continue;
         }
       }
       await sleep(250);
     }
-    if (got < SAMPLES_PER_POSE) {
+    if (got < pose.count) {
       return { error: `Could not capture the "${pose.name}" angle. Turn slightly in the right direction and try again.` };
     }
     if (i < POSES.length - 1) {
