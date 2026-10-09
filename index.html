@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -189,7 +189,7 @@
         <video id="v" autoplay muted playsinline></video>
         <div class="guide"></div>
       </div>
-      <button id="cancel" class="ghost" type="button">Hủy</button>
+      <button id="cancel" class="ghost" type="button">Cancel</button>
     </div>
     <div id="resView" hidden>
       <div id="res" class="res">
@@ -209,10 +209,10 @@
 <!-- Đăng ký nhân viên -->
 <dialog id="regDlg">
   <div class="dlg">
-    <h2>Đăng ký</h2>
+    <h2>Register</h2>
     <form id="regForm" class="reg" autocomplete="off">
       <input id="pin" type="password" placeholder="Admin password">
-      <input id="rid" placeholder="Member code">
+      <input id="rid" placeholder="Member ID">
       <input id="rname" placeholder="Name">
       <p id="regMsg" class="regMsg"></p>
       <div class="two">
@@ -226,9 +226,9 @@
 <!-- Nhập mã thiết bị (chỉ hỏi lần đầu trên mỗi thiết bị) -->
 <dialog id="tokDlg">
   <div class="dlg">
-    <h2>Device code</h2>
+    <h2>Device ID</h2>
     <form id="tokForm" class="reg" autocomplete="off">
-      <input id="tokInput" type="password" placeholder="Enter device code">
+      <input id="tokInput" type="password" placeholder="Enter device id">
       <p id="tokMsg" class="regMsg"></p>
       <button class="solid" type="submit">Save</button>
     </form>
@@ -306,15 +306,15 @@ async function api(action, data = {}) {
   }
   let j;
   try { j = await res.json(); }
-  catch (e) { throw new Error('Máy chủ trả dữ liệu không hợp lệ. Kiểm tra quyền truy cập "Bất kỳ ai" của Apps Script.'); }
+  catch (e) { throw new Error('The server returned an invalid response. Check that the Apps Script web app access is set to "Anyone".'); }
   if (!j.ok) {
     if (j.error === 'UNAUTHORIZED') {
       clearToken();
-      const err = new Error('Incorrect Device code. Please try again');
+      const err = new Error('Incorrect Device ID. Please try again');
       err.code = 'UNAUTHORIZED';
       throw err;
     }
-    throw new Error(j.error || 'Lỗi không xác định.');
+    throw new Error(j.error || 'Unknown error.');
   }
   return j.data;
 }
@@ -358,7 +358,7 @@ function render(flashId) {
     ul.appendChild(li);
   });
   $('listNote').hidden = employees.length > 0;
-  if (!employees.length) $('listNote').textContent = 'Chưa có nhân viên.';
+  if (!employees.length) $('listNote').textContent = 'No members yet.';
 }
 function applyStatuses(map) {
   employees.forEach(e => e.status = map[e.id] || null);
@@ -400,8 +400,8 @@ function stopCamera() {
   $('v').srcObject = null;
 }
 const cameraReason = () => window.isSecureContext
-  ? 'Không bật được camera. Hãy cho phép camera.'
-  : 'Trang cần chạy bằng HTTPS để dùng camera.';
+  ? 'Unable to start the camera. Please allow camera access.'
+  : 'This page must be served over HTTPS to use the camera.';
 
 /* ---------- Hộp thoại quét ---------- */
 function openScan(title, hint) {
@@ -436,7 +436,7 @@ function showResult(r) {      // r = {ok, kind: 'in'|'out', title, sub}
   $('retry').hidden = r.ok;
   $('resBtns').style.gridTemplateColumns = r.ok ? '1fr' : '1fr 1fr';
   $('done').className = r.ok ? 'quiet' : 'ghost';
-  $('done').textContent = 'Đóng';
+  $('done').textContent = 'Close';
   clearTimeout(autoClose);
   if (r.ok && !DEBUG_STATS) autoClose = setTimeout(closeScan, 2600);
 }
@@ -494,17 +494,17 @@ function finishStats(S, t0, outcome) {
     scansDetail: lat.map((ms, i) => `${i + 1}: ${Math.round(ms)}ms / ${S.dists[i] === null ? '-' : S.dists[i]}`).join('; ')
   };
   console.log('SCAN STATS', st);
-  console.table(lat.map((ms, i) => ({ lan: i + 1, detectMs: Math.round(ms), thayMat: S.hit[i] ? 'có' : 'không', khoangCach: S.dists[i] })));
+  console.table(lat.map((ms, i) => ({ scan: i + 1, detectMs: Math.round(ms), faceFound: S.hit[i] ? 'yes' : 'no', distance: S.dists[i] })));
   return st;
 }
 function fmtStats(s) {
   if (!s) return '';
   const f = v => v === null ? '-' : v + 'ms';
-  return `Quét ${s.attempts} lần (${s.facesFound} thấy mặt) / ${s.totalMs}ms · ` +
-    `trễ TB ${s.avgLatMs}ms (${s.minLatMs}-${s.maxLatMs}) · ${s.scansPerSec}/giây · ` +
-    `thấy mặt lúc ${f(s.firstFaceMs)} · nhận ra lúc ${f(s.matchMs)} · ` +
-    `khoảng cách gần nhất ${s.minDist === null ? '-' : s.minDist + (s.minName ? ' (' + s.minName + ')' : '')} / ngưỡng ${s.threshold} · ` +
-    `${s.backend}/${s.detector} · từng lần: ${s.dists.map(x => x === null ? '-' : x).join(', ')}`;
+  return `Scans: ${s.attempts} (${s.facesFound} with face) / ${s.totalMs}ms · ` +
+    `avg latency ${s.avgLatMs}ms (${s.minLatMs}-${s.maxLatMs}) · ${s.scansPerSec}/s · ` +
+    `first face at ${f(s.firstFaceMs)} · matched at ${f(s.matchMs)} · ` +
+    `closest distance ${s.minDist === null ? '-' : s.minDist + (s.minName ? ' (' + s.minName + ')' : '')} / threshold ${s.threshold} · ` +
+    `${s.backend}/${s.detector} · per scan: ${s.dists.map(x => x === null ? '-' : x).join(', ')}`;
 }
 
 // Gửi số liệu quét về Apps Script để ghi vào tab Metrics (không chặn giao diện, lỗi thì bỏ qua)
@@ -532,7 +532,7 @@ function sendMetrics(type, res) {
     backend: s.backend,
     detector: s.detector,
     device: (navigator.userAgent || '').slice(0, 120)
-  }).catch(e => console.warn('logMetrics lỗi:', errText(e)));
+  }).catch(e => console.warn('logMetrics failed:', errText(e)));
 }
 
 async function recognise(token) {
@@ -573,8 +573,8 @@ async function recognise(token) {
   return { error: outcome, stats: finishStats(S, t0, outcome) };
 }
 const REASON = {
-  noface: 'Không thấy khuôn mặt.',
-  unknown: 'Không nhận ra khuôn mặt.'
+  noface: 'No face detected.',
+  unknown: 'Face not recognized.'
 };
 
 /* ---------- Check in / Check out ---------- */
@@ -582,13 +582,13 @@ async function doCheck(type) {
   const label = type === 'IN' ? 'Check in' : 'Check out';
   const token = ++scanToken;
   lastAction = () => doCheck(type);
-  openScan(label, 'Nhìn thẳng vào camera.');
+  openScan(label, 'Look straight at the camera.');
 
   try {
     await startCamera();
     if (token !== scanToken) return stopCamera();
   } catch (e) {
-    return showResult({ ok: false, title: label + ' thất bại', sub: cameraReason() });
+    return showResult({ ok: false, title: label + ' Fail', sub: cameraReason() });
   }
 
   try {
@@ -596,29 +596,29 @@ async function doCheck(type) {
     if (res.cancelled || token !== scanToken) return;
     lastStats = fmtStats(res.stats);
     sendMetrics(type, res);
-    if (res.error) return showResult({ ok: false, title: label + ' thất bại', sub: REASON[res.error] });
+    if (res.error) return showResult({ ok: false, title: label + ' Fail', sub: REASON[res.error] });
 
     const r = await api('logCheck', { id: res.emp.id, type });
     if (token !== scanToken) return;
     handleLog(res.emp, type, label, r);
   } catch (e) {
-    showResult({ ok: false, title: label + ' thất bại', sub: errText(e) });
+    showResult({ ok: false, title: label + ' Fail', sub: errText(e) });
   }
 }
 
 function handleLog(emp, type, label, r) {
-  const verb = type === 'IN' ? 'check in' : 'check out';
-  const fail = sub => showResult({ ok: false, title: label + ' thất bại', sub });
+  const done = type === 'IN' ? 'checked in' : 'checked out';
+  const fail = sub => showResult({ ok: false, title: label + ' Fail', sub });
   if (r.status === 'OK') {
     const e = employees.find(x => x.id === emp.id);
     if (e) e.status = { type, time: r.time };
     render(emp.id);
-    return showResult({ ok: true, kind: type === 'IN' ? 'in' : 'out', title: label + ' thành công', sub: emp.name + ' · ' + r.time });
+    return showResult({ ok: true, kind: type === 'IN' ? 'in' : 'out', title: label + ' Success', sub: emp.name + ' · ' + r.time });
   }
-  if (r.status === 'SAME')    return fail(`${emp.name} đã ${verb} lúc ${r.time}.`);
-  if (r.status === 'NO_IN')   return fail(`${emp.name} chưa check in hôm nay.`);
-  if (r.status === 'UNKNOWN') return fail('Nhân viên không tồn tại trong danh sách.');
-  fail('Không ghi nhận được.');
+  if (r.status === 'SAME')    return fail(`${emp.name} already ${done} at ${r.time}.`);
+  if (r.status === 'NO_IN')   return fail(`${emp.name} has not checked in today.`);
+  if (r.status === 'UNKNOWN') return fail('Member not found in the list.');
+  fail('Unable to record the attendance.');
 }
 
 $('btnIn').addEventListener('click', () => doCheck('IN'));
@@ -634,11 +634,11 @@ $('regForm').addEventListener('submit', async ev => {
   ev.preventDefault();
   const id = $('rid').value.trim(), name = $('rname').value.trim(), pin = $('pin').value;
   const say = t => $('regMsg').textContent = t;
-  if (!id || !name || !pin) return say('Nhập đủ thông tin.');
-  if (employees.some(e => e.id === id)) return say('Mã nhân viên đã tồn tại.');
+  if (!id || !name || !pin) return say('Please fill in all fields.');
+  if (employees.some(e => e.id === id)) return say('Member ID already exists.');
   try {
     const ok = await api('checkPin', { pin });
-    if (!ok) return say('Sai mã PIN.');
+    if (!ok) return say('Incorrect admin password.');
   } catch (e) { return say(errText(e)); }
   $('regDlg').close();
   doRegister(id, name, pin);
@@ -663,9 +663,9 @@ function yawOf(landmarks) {
 }
 
 const POSES = [
-  { name: 'Nhìn thẳng', hint: 'Nhìn thẳng vào camera, giữ yên mặt.', ok: y => Math.abs(y) <= YAW_FRONT },
-  { name: 'Xoay trái',  hint: 'Xoay mặt nhẹ sang TRÁI (về phía trái màn hình).', ok: y => y >= YAW_SIDE_MIN && y <= YAW_SIDE_MAX },
-  { name: 'Xoay phải',  hint: 'Xoay mặt nhẹ sang PHẢI (về phía phải màn hình).', ok: y => y <= -YAW_SIDE_MIN && y >= -YAW_SIDE_MAX }
+  { name: 'Front', hint: 'Look straight at the camera and hold still.', ok: y => Math.abs(y) <= YAW_FRONT },
+  { name: 'Left',  hint: 'Turn your head slightly to the LEFT (toward the left of the screen).', ok: y => y >= YAW_SIDE_MIN && y <= YAW_SIDE_MAX },
+  { name: 'Right', hint: 'Turn your head slightly to the RIGHT (toward the right of the screen).', ok: y => y <= -YAW_SIDE_MIN && y >= -YAW_SIDE_MAX }
 ];
 
 // Trả về { samples } (mỗi mẫu là 1 vector 128 chiều), hoặc { cancelled }, hoặc { error: 'thông báo' }
@@ -674,7 +674,7 @@ async function capturePoses(token) {
   await sleep(700);
   for (let i = 0; i < POSES.length; i++) {
     const pose = POSES[i];
-    const label = `Bước ${i + 1}/${POSES.length}: ${pose.hint}`;
+    const label = `Step ${i + 1}/${POSES.length}: ${pose.hint}`;
     let got = 0;
     const t0 = Date.now();
     $('camHint').textContent = label;
@@ -683,7 +683,7 @@ async function capturePoses(token) {
       const r = await detectFull();
       if (r) {
         const y = yawOf(r.landmarks);
-        console.log(`[đăng ký] ${pose.name}: yaw=${y.toFixed(3)}`);   // xem số này để chỉnh YAW_* nếu cần
+        console.log(`[register] ${pose.name}: yaw=${y.toFixed(3)}`);   // xem số này để chỉnh YAW_* nếu cần
         if (pose.ok(y)) {
           samples.push(r.descriptor);
           got++;
@@ -695,10 +695,10 @@ async function capturePoses(token) {
       await sleep(250);
     }
     if (got < SAMPLES_PER_POSE) {
-      return { error: `Không chụp được góc "${pose.name}". Hãy xoay nhẹ đúng hướng và thử lại.` };
+      return { error: `Could not capture the "${pose.name}" angle. Turn slightly in the right direction and try again.` };
     }
     if (i < POSES.length - 1) {
-      $('camHint').textContent = 'Tốt. Chuẩn bị bước tiếp theo...';
+      $('camHint').textContent = 'Good. Get ready for the next step...';
       await sleep(900);
     }
   }
@@ -708,19 +708,19 @@ async function capturePoses(token) {
 async function doRegister(id, name, pin) {
   const token = ++scanToken;
   lastAction = () => doRegister(id, name, pin);
-  openScan('Đăng ký', 'Nhìn thẳng, giữ yên mặt.');
+  openScan('Register', 'Look straight at the camera and hold still.');
 
   try {
     await startCamera();
     if (token !== scanToken) return stopCamera();
   } catch (e) {
-    return showResult({ ok: false, title: 'Đăng ký thất bại', sub: cameraReason() });
+    return showResult({ ok: false, title: 'Registration Fail', sub: cameraReason() });
   }
 
   try {
     const cap = await capturePoses(token);
     if (cap.cancelled || token !== scanToken) return;
-    if (cap.error) return showResult({ ok: false, title: 'Đăng ký thất bại', sub: cap.error });
+    if (cap.error) return showResult({ ok: false, title: 'Registration Fail', sub: cap.error });
 
     // Lưu TỪNG vector riêng (làm tròn 4 chữ số cho gọn ô Sheet), không lấy trung bình
     const vecs = cap.samples.map(s => Array.from(s, v => +v.toFixed(4)));
@@ -729,16 +729,16 @@ async function doRegister(id, name, pin) {
 
     $('regForm').reset();
     render(id);
-    showResult({ ok: true, kind: 'in', title: 'Đã đăng ký', sub: name });
+    showResult({ ok: true, kind: 'in', title: 'Registered', sub: name });
   } catch (e) {
-    showResult({ ok: false, title: 'Đăng ký thất bại', sub: errText(e) });
+    showResult({ ok: false, title: 'Registration Fail', sub: errText(e) });
   }
 }
 
 /* ---------- Khởi động ---------- */
 async function init() {
   if (!API_URL || API_URL.indexOf('DAN_URL') === 0) {
-    throw new Error('Chưa điền API_URL trong index.html.');
+    throw new Error('API_URL is not set in index.html.');
   }
 
   let msg = '';
@@ -746,7 +746,7 @@ async function init() {
     if (!getToken()) await askToken(msg);
     try { await loadData(); break; }
     catch (e) {
-      if (e.code === 'UNAUTHORIZED') { msg = 'Mã thiết bị không đúng.'; continue; }
+      if (e.code === 'UNAUTHORIZED') { msg = 'Incorrect Device ID.'; continue; }
       throw e;
     }
   }
@@ -785,8 +785,8 @@ async function init() {
 }
 init().catch(e => {
   $('listNote').hidden = false;
-  $('listNote').textContent = 'Không tải được dữ liệu: ' + errText(e);
-  $('actNote').textContent = 'Tải lại trang để thử lại.';
+  $('listNote').textContent = 'Failed to load data: ' + errText(e);
+  $('actNote').textContent = 'Reload the page to try again.';
 });
 </script>
 </body>
