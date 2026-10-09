@@ -249,8 +249,8 @@ const TZ = 'Asia/Ho_Chi_Minh';
 const DEBUG_STATS = true;
 // true: luôn dùng TinyFaceDetector (nhanh hơn nhiều trên tablet/điện thoại). false: dùng SSD khi có WebGL.
 const FORCE_TINY = true;
-const WARMUP_MS = 100;      // chờ trước lần quét đầu tiên (để camera ổn định phơi sáng/lấy nét). Trước đây: 700
-const SCAN_GAP_MS = 50;    // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
+const WARMUP_MS = 300;      // chờ trước lần quét đầu tiên (để camera ổn định phơi sáng/lấy nét). Trước đây: 700
+const SCAN_GAP_MS = 100;    // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
 /* ==================================================== */
 
 let employees = [];        // {id, name, desc, status: {type,time} | null}
@@ -307,11 +307,17 @@ async function apiTimed(action, data = {}) {
       body: JSON.stringify({ token: getToken(), action, ...data })
     });
   } catch (e) {
-    throw new Error('Can not connect to the server.');
+    const err = new Error('Can not connect to the server.');
+    err.code = 'NETWORK';
+    throw err;
   }
   let j;
   try { j = await res.json(); }
-  catch (e) { throw new Error('The server returned an invalid response. Check that the Apps Script web app access is set to "Anyone".'); }
+  catch (e) {
+    const err = new Error('The server returned an invalid response. Check that the Apps Script web app access is set to "Anyone".');
+    err.code = 'NETWORK';
+    throw err;
+  }
   if (!j.ok) {
     if (j.error === 'UNAUTHORIZED') {
       clearToken();
@@ -319,7 +325,9 @@ async function apiTimed(action, data = {}) {
       err.code = 'UNAUTHORIZED';
       throw err;
     }
-    throw new Error(j.error || 'Unknown error.');
+    const err = new Error(j.error || 'Unknown error.');
+    err.code = 'SERVER';
+    throw err;
   }
   // rtMs: tổng thời gian khứ hồi; serverMs: thời gian chạy bên trong Apps Script (backend trả về)
   return { data: j.data, rtMs: Math.round(performance.now() - tReq), serverMs: (typeof j.serverMs === 'number') ? j.serverMs : null };
@@ -369,6 +377,7 @@ function render(flashId) {
 }
 function applyStatuses(map) {
   employees.forEach(e => e.status = map[e.id] || null);
+  applyPending();
   render();
 }
 // Dữ liệu khuôn mặt có thể là 1 vector (dạng cũ) hoặc nhiều vector (dạng mới, mỗi góc mặt một vector)
@@ -382,6 +391,7 @@ async function loadData() {
     id: e.id, name: e.name, status: e.status,
     descs: parseDescs(e.desc)
   }));
+  applyPending();   // giữ lại trạng thái tạm của các lần chấm công chưa kịp đồng bộ
 }
 
 /* ---------- Camera ---------- */
@@ -617,12 +627,22 @@ async function doCheck(type) {
       return showResult({ ok: false, title: label + ' Fail', sub: REASON[res.error] });
     }
 
-    const call = await apiTimed('logCheck', { id: res.emp.id, type });
-    if (token !== scanToken) return;
-    const T = { camMs, logRtMs: call.rtMs, logServerMs: call.serverMs, totalUiMs: Math.round(performance.now() - tBtn) };
+    // Không chờ máy chủ: kiểm tra nhanh bằng trạng thái đã tải, hiện kết quả ngay, rồi ghi nhận ở nền.
+    // Máy chủ vẫn là nơi quyết định cuối cùng; nếu khác kết quả đã hiện thì báo muộn (xem applyServerResult).
+    const T = { camMs, totalUiMs: Math.round(performance.now() - tBtn) };
     lastStats = fmtStats(res.stats, T);
-    sendMetrics(type, res, T);          // gửi sau logCheck để hai lệnh không tranh khóa trên Apps Script
-    handleLog(res.emp, type, label, call.data);
+    const known = employees.find(x => x.id === res.emp.id);
+    const st = known && known.status;
+    if (st && st.type === type) {                      // trùng loại với lần gần nhất hôm nay
+      sendMetrics(type, res, T);
+      return handleLog(res.emp, type, label, { status: 'SAME', time: st.time });
+    }
+    if (!st && type === 'OUT') {                       // check out khi hôm nay chưa check in
+      sendMetrics(type, res, T);
+      return handleLog(res.emp, type, label, { status: 'NO_IN' });
+    }
+    handleLog(res.emp, type, label, { status: 'OK', time: localTime(Date.now()) });
+    enqueueCheck(res.emp, type, { type, res, T });
   } catch (e) {
     showResult({ ok: false, title: label + ' Fail', sub: errText(e) });
   }
@@ -758,6 +778,123 @@ async function doRegister(id, name, pin) {
   }
 }
 
+/* ---------- Hàng đợi ghi nhận ở nền (optimistic UI) ---------- */
+const QUEUE_KEY = 'chamcong_queue';
+const MAX_AGE_MS = 12 * 3600 * 1000;     // bỏ bản ghi chờ quá 12 giờ
+let syncQueue = loadQueue();
+let syncRunning = false;
+let noticeTimer = null, warnUntil = 0;
+
+function loadQueue() {
+  try {
+    const a = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+    return a.filter(x => x && x.id && (x.type === 'IN' || x.type === 'OUT') && Date.now() - x.ts < MAX_AGE_MS);
+  } catch (e) { return []; }
+}
+function saveQueue() {      // lưu vào máy để không mất khi tải lại trang (bỏ phần số liệu đo _m)
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(syncQueue.map(({ id, name, type, ts, tries }) => ({ id, name, type, ts, tries })))); } catch (e) {}
+}
+
+const localTime = ms => new Date(ms).toLocaleTimeString('en-GB', { timeZone: TZ, hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const secsOf = s => { const p = String(s || '').split(':').map(Number); return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0); };
+
+// Dòng thông báo nhỏ phía trên nút Check in/out
+function notice(text, opt) {
+  opt = opt || {};
+  const el = $('actNote');
+  clearTimeout(noticeTimer);
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.style.color = opt.warn ? 'var(--fail)' : '';
+  if (opt.warn) warnUntil = opt.sticky ? Infinity : Date.now() + 10000;
+  if (text && !opt.sticky) noticeTimer = setTimeout(updateSyncNotice, 10000);
+}
+function updateSyncNotice() {
+  if (Date.now() < warnUntil) return;      // đang hiện cảnh báo thì không ghi đè
+  const slow = syncQueue.length > 1 || (syncQueue[0] && syncQueue[0].tries > 0);
+  notice(slow ? `Syncing ${syncQueue.length} record(s)...` : '', { sticky: true });
+}
+
+// Đặt lại trạng thái tạm (lần chấm công đã hiện thành công nhưng chưa được máy chủ xác nhận)
+function applyPending() {
+  syncQueue.forEach(it => {
+    const e = employees.find(x => x.id === it.id);
+    if (e) e.status = { type: it.type, time: localTime(it.ts) };
+  });
+}
+async function refreshStatuses() {
+  try { applyStatuses(await api('getStatuses')); } catch (e) {}
+}
+
+function enqueueCheck(emp, type, metricsCtx) {
+  syncQueue.push({ id: emp.id, name: emp.name, type, ts: Date.now(), tries: 0, _m: metricsCtx });
+  saveQueue();
+  processQueue();
+}
+
+async function processQueue() {
+  if (syncRunning) return;
+  syncRunning = true;
+  try {
+    while (syncQueue.length) {
+      const item = syncQueue[0];
+      updateSyncNotice();
+      let call;
+      try {
+        call = await apiTimed('logCheck', { id: item.id, type: item.type, ts: item.ts });
+      } catch (e) {
+        if (e.code === 'UNAUTHORIZED') {
+          notice('Device ID is no longer valid. Reload the page to enter it again. Pending records are kept.', { warn: true, sticky: true });
+          return;
+        }
+        item.tries = (item.tries || 0) + 1;
+        const limit = e.code === 'SERVER' ? 3 : 20;       // lỗi mạng thử nhiều lần hơn lỗi do máy chủ trả về
+        if (item.tries >= limit) {
+          syncQueue.shift(); saveQueue();
+          notice(`${item.name}: ${item.type === 'IN' ? 'check in' : 'check out'} could not be recorded (${errText(e)}). Please try again.`, { warn: true });
+          await refreshStatuses();                       // trả trạng thái về đúng như máy chủ
+          continue;
+        }
+        saveQueue();
+        await sleep(Math.min(30000, 2000 * Math.pow(2, item.tries - 1)));
+        continue;
+      }
+      syncQueue.shift(); saveQueue();
+      applyServerResult(item, call);
+    }
+  } finally {
+    syncRunning = false;
+    updateSyncNotice();
+  }
+}
+
+// Máy chủ trả kết quả thật cho một lần chấm công đã hiện thành công trước đó
+function applyServerResult(item, call) {
+  const r = call.data || {};
+  const verb = item.type === 'IN' ? 'check in' : 'check out';
+  const e = employees.find(x => x.id === item.id);
+
+  if (r.status === 'OK') {
+    if (e) e.status = { type: item.type, time: r.time };       // giờ chính thức do máy chủ ghi
+    render();
+  } else if (r.status === 'SAME') {
+    // Đã có bản ghi cùng loại. Nếu giờ trùng khoảng giờ quét thì coi như lần gửi trước đã thành công (chỉ mất phản hồi).
+    if (e && r.time) e.status = { type: item.type, time: r.time };
+    render();
+    if (Math.abs(secsOf(r.time) - secsOf(localTime(item.ts))) > 90) {
+      notice(`${item.name}: already ${item.type === 'IN' ? 'checked in' : 'checked out'} at ${r.time}. This scan was not added.`, { warn: true });
+    }
+  } else {
+    const why = r.status === 'NO_IN' ? 'has not checked in today' : 'was not found in the list';
+    notice(`${item.name}: ${verb} was NOT recorded (${why}).`, { warn: true });
+    refreshStatuses();
+  }
+
+  // Gửi số liệu đo, kèm thời gian logCheck thật
+  if (item._m) sendMetrics(item._m.type, item._m.res, Object.assign({}, item._m.T, { logRtMs: call.rtMs, logServerMs: call.serverMs }));
+}
+window.addEventListener('online', processQueue);
+
 /* ---------- Benchmark: đo riêng từng khâu (chỉ hiện nút khi DEBUG_STATS = true) ---------- */
 const avgOf = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : 0;
 
@@ -877,6 +1014,7 @@ async function init() {
   $('btnOut').disabled = false;
   $('actNote').hidden = true;
   if (DEBUG_STATS) $('bench').hidden = false;
+  processQueue();      // gửi các bản ghi còn tồn từ lần trước (nếu có)
 
   // Mỗi 60 giây cập nhật trạng thái; mỗi 10 phút tải lại cả danh sách (nhận người mới đăng ký ở thiết bị khác)
   let n = 0;
