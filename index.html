@@ -250,7 +250,7 @@ const DEBUG_STATS = true;
 // true: luôn dùng TinyFaceDetector (nhanh hơn nhiều trên tablet/điện thoại). false: dùng SSD khi có WebGL.
 const FORCE_TINY = true;
 const WARMUP_MS = 100;      // chờ trước lần quét đầu tiên (để camera ổn định phơi sáng/lấy nét). Trước đây: 700
-const SCAN_GAP_MS = 100;    // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
+const SCAN_GAP_MS = 50;    // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
 /* ==================================================== */
 
 let employees = [];        // {id, name, desc, status: {type,time} | null}
@@ -807,10 +807,16 @@ async function runBenchmark() {
     const desc = Math.max(0, avgOf(T.full) - avgOf(T.lmk));
 
     // Apps Script: gọi 3 lần mỗi loại để thấy lần đầu (có thể bị "nguội") so với các lần sau
-    const ping = [], stat = [];
+    const ping = [], stat = [], dry = [];
     for (let i = 0; i < 3; i++) ping.push(await apiTimed('ping'));
     for (let i = 0; i < 3; i++) stat.push(await apiTimed('getStatuses'));
+    // Chạy y hệt đường đi của check in thật nhưng KHÔNG ghi vào Sheet (dry: true)
+    const emp0 = employees[0];
+    for (let i = 0; i < 3; i++) dry.push(await apiTimed('logCheck', { id: emp0 ? emp0.id : '', type: 'IN', dry: true }));
+    const all = await apiTimed('getEmployees');        // lệnh nặng nhất, chạy khi mở trang
     if (token !== scanToken) return;
+    const stp = (dry[dry.length - 1].data && dry[dry.length - 1].data.t) || {};
+    const step = k => stp[k] == null ? '-' : stp[k];
     const fmtCalls = c => `${c.map(x => x.rtMs).join(', ')} ms  |  server: ${c.map(x => x.serverMs == null ? '-' : x.serverMs).join(', ')} ms`;
 
     const lines = [
@@ -820,7 +826,11 @@ async function runBenchmark() {
       `Descriptor (128 values): ${desc} ms`,
       `Total per scan: ${avgOf(T.full)} ms  (${T.det.length} runs, ${faceapi.tf.getBackend()})`,
       `Ping round trip: ${fmtCalls(ping)}`,
-      `getStatuses round trip: ${fmtCalls(stat)}`
+      `getStatuses round trip: ${fmtCalls(stat)}`,
+      `logCheck (dry run, no write) round trip: ${fmtCalls(dry)}`,
+      `  server steps: find member ${step('findMs')} ms · lock ${step('lockMs')} ms · read Log ${step('readMs')} ms`,
+      `getEmployees round trip: ${all.rtMs} ms  |  server: ${all.serverMs == null ? '-' : all.serverMs} ms`,
+      `Note: a real check in also appends one row to the Log sheet (not included in the dry run).`
     ];
     console.log('BENCHMARK\n' + lines.join('\n'));
     showResult({ ok: true, kind: 'in', title: 'Benchmark', sub: lines.join('\n') });
