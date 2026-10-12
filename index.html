@@ -6,91 +6,112 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Attendance App</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
 <style>
   :root{
-    --bg:#0F0F16; --panel:#15151F; --card:#1A1A27; --line:#262636;
-    --ink:#F1F0F7; --muted:#8C8BA0;
-    --accent:#8269C9; --avatar:#9D87E0;
-    --in:#8FD6B0; --out:#E3B77A; --fail:#E8806B; --flash:#2A2540;
+    --primary:#8370c8; --primary-dark:#6655a8; --primary-light:#a090d8;
+    --green:#4a9e74; --red:#c45c5c;
+    --bg:#0d0d14; --surface:#14141e; --surface-2:#1c1c2a; --surface-3:#24243a;
+    --border:#28283e; --text:#e2e0f0; --text-sub:#7878a0;
+    /* tên cũ, dùng cho hộp thoại */
+    --panel:var(--surface); --card:var(--surface-2); --line:var(--border);
+    --ink:var(--text); --muted:var(--text-sub); --accent:var(--primary); --avatar:var(--primary-light);
+    --in:var(--green); --out:var(--red); --fail:var(--red); --flash:var(--surface-3);
     --cam:#0B0E10;
     box-sizing:border-box;
     padding-top:env(safe-area-inset-top,0px);
     padding-bottom:env(safe-area-inset-bottom,0px);
   }
-  html{scroll-padding-top:env(safe-area-inset-top,0px); background:var(--bg)}
   *,*::before,*::after{box-sizing:inherit}
+  html{height:100%; background:var(--bg); scroll-padding-top:env(safe-area-inset-top,0px)}
   [hidden]{display:none !important}
   body{
-    margin:0; background:var(--bg); color:var(--ink); color-scheme:dark;
-    font-family:'Be Vietnam Pro',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    margin:0; height:100%; background:var(--bg); color:var(--text); color-scheme:dark;
+    font-family:'Google Sans',Roboto,Arial,sans-serif;
     font-size:16px; line-height:1.5; font-weight:400;
+    display:flex; flex-direction:column; overflow:hidden;
     -webkit-user-select:none; user-select:none;
   }
   input{-webkit-user-select:text; user-select:text}
   button{font-family:inherit}
 
-  /* Thanh trên */
-  .header{position:sticky; top:env(safe-area-inset-top,0px); z-index:5; background:var(--accent); color:#fff}
+  /* Header */
+  .header{height:64px; flex-shrink:0; background:var(--primary); color:#fff}
   .header .in{
-    max-width:1100px; margin:0 auto; padding:20px 20px;
-    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    height:100%; padding:0 28px;
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
   }
-  .title{font-size:22px; font-weight:600; color:#fff}
+  .title{font-size:20px; font-weight:600; letter-spacing:.3px; color:#fff}
   .when{text-align:right}
-  .clock{font-size:20px; font-weight:600; line-height:1.2; font-variant-numeric:tabular-nums}
+  .clock{font-size:18px; font-weight:500; opacity:.95; font-variant-numeric:tabular-nums}
   .date{display:none}
 
-  /* Khung */
-  main{max-width:1100px; margin:0 auto; padding:24px 20px 32px; display:grid; gap:20px}
-  .panel{background:var(--panel); border:1px solid var(--line); border-radius:20px; padding:20px 16px 18px}
-  .label{margin:0 0 12px 4px; font-size:13px; font-weight:600; letter-spacing:.08em; color:var(--muted); text-transform:uppercase}
-  .note{color:var(--muted); padding:20px 4px; margin:0}
+  /* Layout chính */
+  main{flex:1; min-height:0; display:flex; flex-direction:column; padding:24px 28px; gap:20px; overflow:hidden}
+  .panel{
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:18px 20px; display:flex; flex-direction:column; min-height:0;
+  }
+  main > .panel:first-child{flex:1}
+  main > .panel:last-child{flex:0 0 auto}
+  .panel > button{flex-shrink:0}
+  .label{
+    margin:0 0 12px; flex-shrink:0; font-size:12px; font-weight:600; letter-spacing:1px;
+    color:var(--text-sub); text-transform:uppercase; line-height:1.5;
+  }
+  .note{color:var(--text-sub); font-size:14px; text-align:center; padding:20px 0; margin:0}
 
-  /* Danh sách tên: 2 cột */
-  #list{list-style:none; margin:0; padding:0; display:grid; grid-template-columns:1fr 1fr; gap:12px}
+  /* Danh sách thành viên */
+  #list{
+    list-style:none; margin:0; padding:0 2px 0 0; flex:1; min-height:0; overflow-y:auto;
+    display:grid; grid-template-columns:repeat(2,1fr); gap:10px; align-content:start;
+  }
   .row{
-    display:flex; align-items:center; gap:16px; min-height:84px; padding:0 20px;
-    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    display:flex; align-items:center; gap:14px; min-height:56px; padding:12px 16px;
+    background:var(--surface-2); border:2px solid var(--border); border-radius:12px;
+    font-size:16px; font-weight:500;
   }
   .avatar{
-    flex:none; width:54px; height:54px; border-radius:50%;
-    background:var(--avatar); color:#2A1F4D; font-weight:700; font-size:16px;
+    flex:none; width:36px; height:36px; border-radius:50%;
+    background:var(--primary-light); color:#1a1a28; font-weight:700; font-size:14px;
     display:flex; align-items:center; justify-content:center;
   }
-  .name{flex:1; min-width:0; font-size:20px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .st{display:flex; align-items:center; gap:8px; font-size:14px; white-space:nowrap; font-variant-numeric:tabular-nums}
+  .name{flex:1; min-width:0; font-size:16px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .st{display:flex; align-items:center; gap:8px; font-size:13px; white-space:nowrap; font-variant-numeric:tabular-nums}
   .st::before{content:""; width:8px; height:8px; border-radius:50%; background:currentColor}
-  .st.in{color:var(--in)}
-  .st.out{color:var(--out)}
+  .st.in{color:var(--green)}
+  .st.out{color:var(--red)}
   .st.out::before{background:transparent; box-shadow:inset 0 0 0 1.5px currentColor}
   .row.flash{animation:flash 1.8s ease-out}
-  @keyframes flash{from{background:var(--flash)} to{background:var(--card)}}
+  @keyframes flash{from{background:var(--surface-3)} to{background:var(--surface-2)}}
   .add{
-    display:block; margin:20px auto 0; width:44px; height:44px; border-radius:50%;
-    border:1px solid var(--line); background:transparent; color:var(--muted);
-    font-size:24px; line-height:1; cursor:pointer;
+    display:block; margin:12px auto 0; width:40px; height:40px; border-radius:50%;
+    border:1px solid var(--border); background:transparent; color:var(--text-sub);
+    font-size:22px; line-height:1; cursor:pointer;
   }
 
-  /* Nút Clock in / Clock out */
-  .actNote{margin:0 0 10px 4px; color:var(--muted); font-size:14px}
-  .btns{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  /* Clock action */
+  .btns{display:flex; gap:16px}
   .big{
-    min-height:104px; border:1px solid var(--line); border-radius:14px; cursor:pointer;
-    font-size:24px; font-weight:600; letter-spacing:.02em; text-transform:uppercase;
-    display:flex; align-items:center; justify-content:center; gap:12px;
+    flex:1; padding:22px 0; border-radius:12px; border:2px solid var(--border);
+    background:var(--surface-2); color:var(--text); cursor:pointer;
+    font-size:20px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    transition:all .15s ease;
   }
-  .big::before{content:""; width:12px; height:12px; border-radius:50%; background:currentColor}
-  .big.cin{background:var(--accent); border-color:var(--accent); color:#fff}
-  .big.cout{background:#2A2A3C; color:var(--ink)}
-  .big:disabled{background:#181823; border-color:var(--line); color:#4D4D62; cursor:not-allowed}
+  .big::before{content:""; width:10px; height:10px; border-radius:50%; background:currentColor; opacity:.5}
+  .big.cin{background:var(--primary); border-color:var(--primary); color:#fff}
+  .big.cout{background:var(--surface-3); border-color:var(--surface-3)}
+  .big:hover:not(:disabled){filter:brightness(1.1)}
+  .big:disabled{opacity:.35; cursor:not-allowed}
+  .big.cin:disabled,.big.cout:disabled{background:var(--surface-2); border-color:var(--border); color:var(--text)}
+  .actNote{margin:10px 0 0; font-size:12px; color:var(--text-sub); text-align:center; min-height:16px}
 
   @media (max-width:700px){
-    #list,.btns{grid-template-columns:1fr}
-    .big{min-height:76px; font-size:20px}
+    main{padding:16px; gap:14px}
+    #list{grid-template-columns:1fr}
+    .btns{flex-direction:column}
+    .big{padding:18px 0}
   }
 
   /* Hộp thoại */
@@ -171,11 +192,11 @@
 
   <section class="panel">
     <h2 class="label">2. Clock action</h2>
-    <p id="actNote" class="actNote">Loading...</p>
     <div class="btns">
       <button id="btnIn" class="big cin" disabled>Clock in</button>
       <button id="btnOut" class="big cout" disabled>Clock out</button>
     </div>
+    <p id="actNote" class="actNote">Loading...</p>
   </section>
 </main>
 
