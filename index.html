@@ -264,8 +264,8 @@
         flex: 1;
         padding: 22px 0;
         border-radius: 12px;
-        border: 2px solid var(--border);
-        background: var(--surface-2);
+        border: 2px solid var(--surface-3);
+        background: var(--surface-3);
         color: var(--text);
         cursor: pointer;
         font-size: 20px;
@@ -285,6 +285,11 @@
         border-radius: 50%;
         background: currentColor;
         opacity: 0.5;
+      }
+      .big.active {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
       }
       .big.cin {
         background: var(--primary);
@@ -537,8 +542,8 @@
       <section class="panel">
         <h2 class="label">2. Clock action</h2>
         <div class="btns">
-          <button id="btnIn" class="big cin" disabled>Clock in</button>
-          <button id="btnOut" class="big cout" disabled>Clock out</button>
+          <button id="btnIn" class="big" disabled>Clock in</button>
+          <button id="btnOut" class="big" disabled>Clock out</button>
         </div>
         <p id="actNote" class="actNote">Loading...</p>
       </section>
@@ -851,10 +856,15 @@
       function closeScan() {
         if ($("scanDlg").open) $("scanDlg").close();
       }
+      function setActiveBtn(type) {
+        $("btnIn").classList.toggle("active", type === "IN");
+        $("btnOut").classList.toggle("active", type === "OUT");
+      }
       $("scanDlg").addEventListener("close", () => {
         scanToken++;
         clearTimeout(autoClose);
         stopCamera();
+        setActiveBtn(null);
       });
       $("cancel").addEventListener("click", closeScan);
       $("done").addEventListener("click", closeScan);
@@ -1046,6 +1056,7 @@
 
       /* ---------- Check in / Check out ---------- */
       async function doCheck(type) {
+        setActiveBtn(type);
         const label = type === "IN" ? "Check in" : "Check out";
         const token = ++scanToken;
         const tBtn = performance.now(); // mốc bắt đầu: lúc bấm nút
