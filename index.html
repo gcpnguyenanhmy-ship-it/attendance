@@ -264,6 +264,8 @@
         flex: 1;
         padding: 22px 0;
         border-radius: 12px;
+        border: 2px solid var(--border);
+        background: var(--surface-2);
         border: 2px solid var(--surface-3);
         background: var(--surface-3);
         color: var(--text);
@@ -286,10 +288,15 @@
         background: currentColor;
         opacity: 0.5;
       }
+      .big.cin {
       .big.active {
         background: var(--primary);
         border-color: var(--primary);
         color: #fff;
+      }
+      .big.cout {
+        background: var(--surface-3);
+        border-color: var(--surface-3);
       }
       .big:hover:not(:disabled) {
         filter: brightness(1.1);
@@ -297,6 +304,9 @@
       .big:disabled {
         opacity: 0.35;
         cursor: not-allowed;
+      }
+      .big.cin:disabled,
+      .big.cout:disabled {
         background: var(--surface-2);
         border-color: var(--border);
         color: var(--text);
@@ -530,6 +540,8 @@
       <section class="panel">
         <h2 class="label">2. Clock action</h2>
         <div class="btns">
+          <button id="btnIn" class="big cin" disabled>Clock in</button>
+          <button id="btnOut" class="big cout" disabled>Clock out</button>
           <button id="btnIn" class="big" disabled>Clock in</button>
           <button id="btnOut" class="big" disabled>Clock out</button>
         </div>
