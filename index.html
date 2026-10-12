@@ -148,8 +148,6 @@
   .resIcon svg{width:88px; height:88px}
   .res h2{margin-top:14px; font-size:22px}
   .res p{margin:6px 0 0; color:var(--muted); font-size:16px; overflow-wrap:anywhere}
-  .res p.stats{margin-top:14px; font-size:12px; line-height:1.5; color:var(--muted); font-variant-numeric:tabular-nums}
-  .res p.stats:empty{display:none}
   #resSub{white-space:pre-line}
   #resBtns{margin-top:18px}
   .tick{stroke-dasharray:60; stroke-dashoffset:60; animation:draw .5s .12s ease forwards}
@@ -187,7 +185,6 @@
     <p id="listNote" class="note">Loading...</p>
     <ul id="list"></ul>
     <button id="openReg" class="add" type="button" aria-label="Register New Member" title="Register New Member">+</button>
-    <button id="bench" class="quiet" type="button" hidden>Run benchmark</button>
   </section>
 
   <section class="panel">
@@ -217,7 +214,6 @@
         <div id="resIcon" class="resIcon"></div>
         <h2 id="resTitle"></h2>
         <p id="resSub"></p>
-        <p id="resStats" class="stats"></p>
       </div>
       <div id="resBtns" class="two">
         <button id="retry" class="solid" type="button">Retry</button>
@@ -264,8 +260,6 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbxsNhqAJFi3AcGmBFHFlpLD
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
 const THRESHOLD = 0.4;      // nếu báo "Không nhận ra khuôn mặt" nhiều, thử 0.55 - 0.6
 const TZ = 'Asia/Ho_Chi_Minh';
-// true: hộp thoại kết quả KHÔNG tự đóng để kịp đọc số liệu khi test trên điện thoại. Dùng thật thì đổi thành false.
-const DEBUG_STATS = true;
 // true: luôn dùng TinyFaceDetector (nhanh hơn nhiều trên tablet/điện thoại). false: dùng SSD khi có WebGL.
 const FORCE_TINY = true;
 const WARMUP_MS = 300;      // chờ trước lần quét đầu tiên (để camera ổn định phơi sáng/lấy nét). Trước đây: 700
@@ -278,7 +272,6 @@ let stream = null;
 let scanToken = 0;         // đổi số này để hủy các vòng quét đang chạy
 let lastAction = null;
 let autoClose = null;
-let lastStats = '';        // chuỗi số liệu đo của lần quét gần nhất
 
 // Bộ phát hiện mặt: mặc định SSD (chính xác). Nếu thiết bị không có WebGL sẽ tự đổi sang Tiny (nhanh) trong init()
 let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 });
@@ -446,7 +439,6 @@ const cameraReason = () => window.isSecureContext
 /* ---------- Hộp thoại quét ---------- */
 function openScan(title, hint) {
   clearTimeout(autoClose);
-  lastStats = '';
   $('camTitle').textContent = title;
   $('camHint').textContent = hint;
   $('camView').hidden = false;
@@ -472,13 +464,12 @@ function showResult(r) {      // r = {ok, kind: 'in'|'out', title, sub}
   $('resIcon').innerHTML = r.ok ? ICON_OK(r.kind) : ICON_FAIL;
   $('resTitle').textContent = r.title;
   $('resSub').textContent = r.sub;
-  $('resStats').textContent = lastStats;
   $('retry').hidden = r.ok;
   $('resBtns').style.gridTemplateColumns = r.ok ? '1fr' : '1fr 1fr';
   $('done').className = r.ok ? 'quiet' : 'ghost';
   $('done').textContent = 'Close';
   clearTimeout(autoClose);
-  if (r.ok && !DEBUG_STATS) autoClose = setTimeout(closeScan, 2600);
+  if (r.ok) autoClose = setTimeout(closeScan, 2600);
 }
 
 /* ---------- Nhận diện ---------- */
@@ -533,23 +524,8 @@ function finishStats(S, t0, outcome) {
     // "1: 874ms / 0.47; 2: 752ms / -; ..." (mỗi lần quét: độ trễ / khoảng cách)
     scansDetail: lat.map((ms, i) => `${i + 1}: ${Math.round(ms)}ms / ${S.dists[i] === null ? '-' : S.dists[i]}`).join('; ')
   };
-  console.log('SCAN STATS', st);
-  console.table(lat.map((ms, i) => ({ scan: i + 1, detectMs: Math.round(ms), faceFound: S.hit[i] ? 'yes' : 'no', distance: S.dists[i] })));
   return st;
 }
-function fmtStats(s, T) {
-  if (!s) return '';
-  const f = v => v === null ? '-' : v + 'ms';
-  return `Scans: ${s.attempts} (${s.facesFound} with face) / ${s.totalMs}ms · ` +
-    `avg latency ${s.avgLatMs}ms (${s.minLatMs}-${s.maxLatMs}) · ${s.scansPerSec}/s · ` +
-    `first face at ${f(s.firstFaceMs)} · matched at ${f(s.matchMs)} · ` +
-    `closest distance ${s.minDist === null ? '-' : s.minDist + (s.minName ? ' (' + s.minName + ')' : '')} / threshold ${s.threshold} · ` +
-    `${s.backend}/${s.detector} · per scan: ${s.dists.map(x => x === null ? '-' : x).join(', ')}` +
-    (T ? ` · camera ${T.camMs}ms` +
-         (T.logRtMs != null ? ` · logCheck ${T.logRtMs}ms (server ${T.logServerMs == null ? '-' : T.logServerMs + 'ms'})` : '') +
-         ` · total ${T.totalUiMs}ms` : '');
-}
-
 // Gửi số liệu quét về Apps Script để ghi vào tab Metrics (không chặn giao diện, lỗi thì bỏ qua)
 function sendMetrics(type, res, T) {
   const s = res && res.stats;
@@ -645,7 +621,6 @@ async function doCheck(type) {
     if (res.cancelled || token !== scanToken) return;
     if (res.error) {
       const T = { camMs, totalUiMs: Math.round(performance.now() - tBtn) };
-      lastStats = fmtStats(res.stats, T);
       sendMetrics(type, res, T);
       return showResult({ ok: false, title: label + ' Fail', sub: REASON[res.error] });
     }
@@ -653,7 +628,6 @@ async function doCheck(type) {
     // Không chờ máy chủ: kiểm tra nhanh bằng trạng thái đã tải, hiện kết quả ngay, rồi ghi nhận ở nền.
     // Máy chủ vẫn là nơi quyết định cuối cùng; nếu khác kết quả đã hiện thì báo muộn (xem applyServerResult).
     const T = { camMs, totalUiMs: Math.round(performance.now() - tBtn) };
-    lastStats = fmtStats(res.stats, T);
     const known = employees.find(x => x.id === res.emp.id);
     const st = known && known.status;
     if (st && st.type === type) {                      // trùng loại với lần gần nhất hôm nay
@@ -918,88 +892,6 @@ function applyServerResult(item, call) {
 }
 window.addEventListener('online', processQueue);
 
-/* ---------- Benchmark: đo riêng từng khâu (chỉ hiện nút khi DEBUG_STATS = true) ---------- */
-const avgOf = a => a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : 0;
-
-async function runBenchmark() {
-  const token = ++scanToken;
-  lastAction = runBenchmark;
-  openScan('Benchmark', 'Look straight at the camera. Measuring...');
-
-  const tCam = performance.now();
-  try {
-    await startCamera();
-    if (token !== scanToken) return stopCamera();
-  } catch (e) {
-    return showResult({ ok: false, title: 'Benchmark Fail', sub: cameraReason() });
-  }
-  const camMs = Math.round(performance.now() - tCam);
-
-  try {
-    await sleep(WARMUP_MS);
-    const v = $('v');
-    await detectFull();                          // chạy 1 lần để làm nóng (lần đầu thường chậm do biên dịch shader WebGL)
-
-    // Mỗi vòng chạy 3 chuỗi: [phát hiện], [phát hiện + điểm mốc], [phát hiện + điểm mốc + vector]
-    // rồi lấy hiệu để suy ra thời gian của từng bước.
-    const T = { det: [], lmk: [], full: [] };
-    for (let tries = 0; tries < 20 && T.det.length < 6; tries++) {
-      if (token !== scanToken) return;
-      let a = performance.now();
-      const r1 = await faceapi.detectSingleFace(v, DET_OPTS);
-      const dDet = performance.now() - a;
-      if (!r1) { await sleep(200); continue; }
-
-      a = performance.now();
-      await faceapi.detectSingleFace(v, DET_OPTS).withFaceLandmarks();
-      const dLmk = performance.now() - a;
-
-      a = performance.now();
-      await faceapi.detectSingleFace(v, DET_OPTS).withFaceLandmarks().withFaceDescriptor();
-      const dFull = performance.now() - a;
-
-      T.det.push(dDet); T.lmk.push(dLmk); T.full.push(dFull);
-    }
-    if (T.det.length < 3) return showResult({ ok: false, title: 'Benchmark Fail', sub: REASON.noface });
-
-    const det = avgOf(T.det);
-    const lmk = Math.max(0, avgOf(T.lmk) - det);
-    const desc = Math.max(0, avgOf(T.full) - avgOf(T.lmk));
-
-    // Apps Script: gọi 3 lần mỗi loại để thấy lần đầu (có thể bị "nguội") so với các lần sau
-    const ping = [], stat = [], dry = [];
-    for (let i = 0; i < 3; i++) ping.push(await apiTimed('ping'));
-    for (let i = 0; i < 3; i++) stat.push(await apiTimed('getStatuses'));
-    // Chạy y hệt đường đi của check in thật nhưng KHÔNG ghi vào Sheet (dry: true)
-    const emp0 = employees[0];
-    for (let i = 0; i < 3; i++) dry.push(await apiTimed('logCheck', { id: emp0 ? emp0.id : '', type: 'IN', dry: true }));
-    const all = await apiTimed('getEmployees');        // lệnh nặng nhất, chạy khi mở trang
-    if (token !== scanToken) return;
-    const stp = (dry[dry.length - 1].data && dry[dry.length - 1].data.t) || {};
-    const step = k => stp[k] == null ? '-' : stp[k];
-    const fmtCalls = c => `${c.map(x => x.rtMs).join(', ')} ms  |  server: ${c.map(x => x.serverMs == null ? '-' : x.serverMs).join(', ')} ms`;
-
-    const lines = [
-      `Camera open: ${camMs} ms`,
-      `Face detection (${DET_NAME}): ${det} ms`,
-      `Landmarks (68 points): ${lmk} ms`,
-      `Descriptor (128 values): ${desc} ms`,
-      `Total per scan: ${avgOf(T.full)} ms  (${T.det.length} runs, ${faceapi.tf.getBackend()})`,
-      `Ping round trip: ${fmtCalls(ping)}`,
-      `getStatuses round trip: ${fmtCalls(stat)}`,
-      `logCheck (dry run, no write) round trip: ${fmtCalls(dry)}`,
-      `  server steps: find member ${step('findMs')} ms · lock ${step('lockMs')} ms · read Log ${step('readMs')} ms`,
-      `getEmployees round trip: ${all.rtMs} ms  |  server: ${all.serverMs == null ? '-' : all.serverMs} ms`,
-      `Note: a real check in also appends one row to the Log sheet (not included in the dry run).`
-    ];
-    console.log('BENCHMARK\n' + lines.join('\n'));
-    showResult({ ok: true, kind: 'in', title: 'Benchmark', sub: lines.join('\n') });
-  } catch (e) {
-    showResult({ ok: false, title: 'Benchmark Fail', sub: errText(e) });
-  }
-}
-$('bench').addEventListener('click', runBenchmark);
-
 /* ---------- Khởi động ---------- */
 async function init() {
   if (!API_URL || API_URL.indexOf('DAN_URL') === 0) {
@@ -1036,7 +928,6 @@ async function init() {
   $('btnIn').disabled = false;
   $('btnOut').disabled = false;
   $('actNote').hidden = true;
-  if (DEBUG_STATS) $('bench').hidden = false;
   processQueue();      // gửi các bản ghi còn tồn từ lần trước (nếu có)
 
   // Mỗi 60 giây cập nhật trạng thái; mỗi 10 phút tải lại cả danh sách (nhận người mới đăng ký ở thiết bị khác)
