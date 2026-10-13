@@ -1158,27 +1158,53 @@
       $("btnOut").addEventListener("click", () => doCheck("OUT"));
 
       /* ---------- Đăng ký nhân viên ---------- */
+      $("regCancel").addEventListener("click", () => $("regDlg").close());
+      /* ---------- Đăng ký nhân viên ---------- */
+      let regBusy = false; // chặn gửi trùng khi vừa nhập đủ 4 số vừa bấm Enter
+      const regSay = (t) => ($("regMsg").textContent = t);
+
       $("openReg").addEventListener("click", () => {
-        $("regMsg").textContent = "";
+        $("regForm").reset();
+        regSay("");
         $("regDlg").showModal();
       });
       $("regCancel").addEventListener("click", () => $("regDlg").close());
-      $("regForm").addEventListener("submit", async (ev) => {
-        ev.preventDefault();
+
+      async function submitRegister() {
+        if (regBusy) return;
         const id = $("rid").value.trim(),
           pin = $("pin").value.trim();
-        const say = (t) => ($("regMsg").textContent = t);
-        if (!id || !pin) return say("Please fill in all fields.");
-        if (!/^\d{4,6}$/.test(pin)) return say("PIN must be 4-6 digits.");
+        if (!id) {
+          regSay("Please enter your staff code.");
+          return $("rid").focus();
+        }
+        if (!/^\d{4}$/.test(pin)) return regSay("PIN must be 4 digits.");
         if (employees.some((e) => e.id === id))
-          return say("This staff code has already registered a face.");
+          return regSay("This staff code has already registered a face.");
+
+        regBusy = true;
         try {
           await api("checkRegister", { id, pin });
         } catch (e) {
-          return say(errText(e));
+          regBusy = false;
+          return regSay(errText(e));
         }
+        regBusy = false;
         $("regDlg").close();
         doRegister(id, pin);
+      }
+
+      $("regForm").addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        submitRegister();
+      });
+
+      // Chỉ nhận chữ số, đủ 4 số thì tự chạy
+      $("pin").addEventListener("input", () => {
+        const el = $("pin");
+        el.value = el.value.replace(/\D/g, "").slice(0, 4);
+        regSay("");
+        if (el.value.length === 4) submitRegister();
       });
 
       /* ---------- Đăng ký nhiều góc mặt ---------- */
