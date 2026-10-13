@@ -880,7 +880,7 @@
         $("camView").hidden = true;
         $("resView").hidden = false;
         $("res").className = "res " + (r.ok ? r.kind : "fail");
-        $("resIcon").innerHTML = r.ok ? ICON_OK(r.kind) : ICON_FAIL;
+        $("resIcon").innerHTML = r.ok ? ICON_OK("green") : ICON_FAIL;
         $("resTitle").textContent = r.title;
         $("resSub").textContent = r.sub;
         $("retry").hidden = r.ok;
@@ -1109,6 +1109,13 @@
             sendMetrics(type, res, T);
             return handleLog(res.emp, type, label, { status: "NO_IN" });
           }
+          if (st && st.type === "OUT" && type === "IN") {
+            sendMetrics(type, res, T);
+            return handleLog(res.emp, type, label, {
+              status: "DONE_OUT",
+              time: st.time,
+            });
+          }
           handleLog(res.emp, type, label, {
             status: "OK",
             time: localTime(Date.now()),
@@ -1138,6 +1145,10 @@
           return fail(`${emp.name} already ${done} at ${r.time}.`);
         if (r.status === "NO_IN")
           return fail(`${emp.name} has not checked in today.`);
+        if (r.status === "DONE_OUT")
+          return fail(
+            `${emp.name} already checked out at ${r.time}. Cannot check in again today.`,
+          );
         if (r.status === "UNKNOWN")
           return fail("Member not found in the list.");
         fail("Unable to record the attendance.");
@@ -1481,10 +1492,10 @@
           const why =
             r.status === "NO_IN"
               ? "has not checked in today"
-              : "was not found in the list";
-          notice(`${item.name}: ${verb} was NOT recorded (${why}).`, {
-            warn: true,
-          });
+              : r.status === "UNKNOWN"
+                ? "was not found in the list"
+                : "was rejected by the server (only one check in and one check out per day)";
+          notice(`${item.name}: ${verb} was NOT recorded (${why}).`, { warn: true });
           refreshStatuses();
         }
 
