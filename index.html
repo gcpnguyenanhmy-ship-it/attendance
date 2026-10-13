@@ -580,8 +580,8 @@
       <div class="dlg">
         <h2>Register</h2>
         <form id="regForm" class="reg" autocomplete="off">
-          <input id="pin" type="password" placeholder="Admin password" />
           <input id="rid" placeholder="Staff Code (Member ID)" />
+          <input id="pin" type="password" inputmode="numeric" maxlength="6" placeholder="Set your PIN (4-6 digits)" />
           <p id="regMsg" class="regMsg"></p>
           <div class="two">
             <button id="regCancel" class="ghost" type="button">Cancel</button>
@@ -1166,14 +1166,14 @@
       $("regForm").addEventListener("submit", async (ev) => {
         ev.preventDefault();
         const id = $("rid").value.trim(),
-          pin = $("pin").value;
+          pin = $("pin").value.trim();
         const say = (t) => ($("regMsg").textContent = t);
         if (!id || !pin) return say("Please fill in all fields.");
+        if (!/^\d{4,6}$/.test(pin)) return say("PIN must be 4-6 digits.");
         if (employees.some((e) => e.id === id))
-          return say("Member ID already exists.");
+          return say("This staff code has already registered a face.");
         try {
-          const ok = await api("checkPin", { pin });
-          if (!ok) return say("Incorrect admin password.");
+          await api("checkRegister", { id, pin });
         } catch (e) {
           return say(errText(e));
         }
