@@ -1147,7 +1147,7 @@
           return fail(`${emp.name} has not checked in today.`);
         if (r.status === "DONE_OUT")
           return fail(
-            `${emp.name} already checked out at ${r.time}. Cannot check in again today.`,
+            `${emp.name} already checked out at ${r.time}. \n Cannot check in again today.`,
           );
         if (r.status === "UNKNOWN")
           return fail("Member not found in the list.");
