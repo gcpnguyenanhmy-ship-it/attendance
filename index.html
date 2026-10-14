@@ -616,6 +616,7 @@
           stroke-dashoffset: 0;
         }
       }
+     .regWarn { margin: 12px 0 4px; color: var(--primary-light); font-size: 15px; }
     </style>
   </head>
   <body>
@@ -700,6 +701,25 @@
             <button class="solid" type="submit">Open camera</button>
           </div>
         </form>
+                <div id="regConfirm" hidden>
+          <p class="regWarn">
+            This staff already registered a face. Overwrite the face and PIN?
+          </p>
+          <form class="reg" autocomplete="off" onsubmit="return false">
+            <input
+              id="newPin"
+              type="password"
+              inputmode="numeric"
+              maxlength="4"
+              placeholder="New PIN (optional, 4 digits)"
+            />
+          </form>
+          <p id="confirmMsg" class="regMsg"></p>
+          <div class="two">
+            <button id="regNo" class="ghost" type="button">Cancel</button>
+            <button id="regYes" class="solid" type="button">Overwrite</button>
+          </div>
+        </div>
       </div>
     </dialog>
 
@@ -1414,15 +1434,26 @@
       });
 
       /* ---------- Đăng ký nhân viên ---------- */
-      let regBusy = false; // chặn gửi trùng khi vừa nhập đủ 4 số vừa bấm Enter
+            let regBusy = false; // chặn gửi trùng khi vừa nhập đủ 4 số vừa bấm Enter
+      let regPending = null; // {id, pin} đang chờ xác nhận ghi đè
       const regSay = (t) => ($("regMsg").textContent = t);
+
+      function regStep(confirm) {
+        $("regForm").hidden = confirm;
+        $("regConfirm").hidden = !confirm;
+      }
 
       $("openReg").addEventListener("click", () => {
         $("regForm").reset();
+        $("newPin").value = "";
+        $("confirmMsg").textContent = "";
+        regPending = null;
         regSay("");
+        regStep(false);
         $("regDlg").showModal();
       });
       $("regCancel").addEventListener("click", () => $("regDlg").close());
+      $("regNo").addEventListener("click", () => $("regDlg").close());
 
       async function submitRegister() {
         if (regBusy) return;
@@ -1433,20 +1464,49 @@
           return $("rid").focus();
         }
         if (!/^\d{4}$/.test(pin)) return regSay("PIN must be 4 digits.");
-        if (employees.some((e) => e.id === id))
-          return regSay("This staff code has already registered a face.");
 
         regBusy = true;
+        let r;
         try {
-          await api("checkRegister", { id, pin });
+          r = await api("checkRegister", { id, pin });
         } catch (e) {
           regBusy = false;
           return regSay(errText(e));
         }
         regBusy = false;
+
+        if (r && r.exists) {
+          // Đã đăng ký: hỏi có ghi đè không
+          regPending = { id, pin };
+          $("newPin").value = "";
+          $("confirmMsg").textContent = "";
+          regStep(true);
+          return;
+        }
+        if (document.activeElement) document.activeElement.blur();
         $("regDlg").close();
-        doRegister(id, pin);
+        doRegister(id, pin, "", false);
       }
+
+      $("regYes").addEventListener("click", () => {
+        if (!regPending) return;
+        const newPin = $("newPin").value.trim();
+        if (newPin && !/^\d{4}$/.test(newPin)) {
+          $("confirmMsg").textContent = "New PIN must be 4 digits.";
+          return;
+        }
+        const { id, pin } = regPending;
+        regPending = null;
+        if (document.activeElement) document.activeElement.blur();
+        $("regDlg").close();
+        doRegister(id, pin, newPin, true);
+      });
+
+      $("newPin").addEventListener("input", () => {
+        const el = $("newPin");
+        el.value = el.value.replace(/\D/g, "").slice(0, 4);
+        $("confirmMsg").textContent = "";
+      });
 
       $("regForm").addEventListener("submit", (ev) => {
         ev.preventDefault();
@@ -1540,10 +1600,13 @@
         return { samples };
       }
 
-      async function doRegister(id, pin) {
+      async function doRegister(id, pin, newPin, overwrite) {
         const token = ++scanToken;
-        lastAction = () => doRegister(id, pin);
-        openScan("Register", "Look straight at the camera and hold still.");
+        lastAction = () => doRegister(id, pin, newPin, overwrite);
+        openScan(
+          overwrite ? "Update" : "Register",
+          "Look straight at the camera and hold still.",
+        );
 
         try {
           await startCamera();
@@ -1574,20 +1637,24 @@
             id,
             descJson: JSON.stringify(vecs),
             pin,
+            newPin,
+            overwrite,
           });
-          employees.push({
-            id,
-            name: empName,
-            descs: vecs.map((v) => new Float32Array(v)),
-            status: null,
-          });
+          const descs = vecs.map((v) => new Float32Array(v));
+          const ex = employees.find((e) => e.id === id);
+          if (ex) {
+            ex.descs = descs; // ghi đè khuôn mặt của người đã có
+            ex.name = empName;
+          } else {
+            employees.push({ id, name: empName, descs, status: null });
+          }
 
           $("regForm").reset();
           render(id);
           showResult({
             ok: true,
             kind: "in",
-            title: "Registered",
+            title: overwrite ? "Updated" : "Registered",
             sub: empName,
           });
         } catch (e) {
