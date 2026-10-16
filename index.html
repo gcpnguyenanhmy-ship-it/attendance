@@ -109,7 +109,9 @@
         font-variant-numeric: tabular-nums;
       }
       .date {
-        display: none;
+        font-size: 12px;
+        line-height: 1.3;
+        opacity: 0.85;
       }
 
       /* Layout chính */
@@ -675,6 +677,10 @@
       <div class="in">
         <div class="title">Attendance Clock</div>
         <div class="hdrRight">
+          <div class="when">
+            <div id="clock" class="clock">--:--:--</div>
+            <div id="date" class="date">&nbsp;</div>
+          </div>
           <button
             id="openReg"
             class="add"
@@ -684,10 +690,6 @@
           >
             +
           </button>
-          <div class="when">
-            <div id="clock" class="clock">--:--:--</div>
-            <div id="date" class="date">&nbsp;</div>
-          </div>
         </div>
       </div>
     </header>
@@ -976,6 +978,13 @@
           minute: "2-digit",
           second: "2-digit",
           hour12: true,
+        });
+        $("date").textContent = now.toLocaleDateString("en-GB", {
+          timeZone: TZ,
+          weekday: "short",
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
         });
       }
       setInterval(tick, 1000);
