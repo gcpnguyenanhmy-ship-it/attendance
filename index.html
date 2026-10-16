@@ -862,8 +862,8 @@
       let lastAction = null;
       let autoClose = null;
 
-      // Bộ phát hiện mặt: mặc định SSD (chính xác). Nếu thiết bị không có WebGL sẽ tự đổi sang Tiny (nhanh) trong init()
-      let DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 });
+      // Bộ phát hiện mặt: tạo trong loadFaceModels() sau khi tải model (SSD nếu có WebGL và FORCE_TINY=false, ngược lại Tiny)
+      let DET_OPTS = null;
       let DET_NAME = "ssd";
 
       const $ = (id) => document.getElementById(id);
@@ -1036,6 +1036,43 @@
         applyPending();
         render();
       }
+      // Cập nhật danh sách theo M_Employee: thêm người mới, đổi tên, bỏ người đã xoá, cập nhật trạng thái.
+      // Giữ nguyên dữ liệu khuôn mặt đã tải. Trả về true nếu cần tải lại vector (có người mới đã có mặt / mặt bị đổi).
+      function syncRoster(list) {
+        const old = new Map(employees.map((e) => [e.id, e]));
+        let needFull = false;
+        employees = list.map((r) => {
+          const e = old.get(r.id) || { id: r.id, descs: [], face: 0 };
+          e.name = r.name;
+          e.status = r.status;
+          if ((r.face || 0) !== (e.face || 0)) needFull = true;
+          return e;
+        });
+        applyPending();
+        render();
+        return needFull;
+      }
+      const anyDialogOpen = () =>
+        $("scanDlg").open ||
+        $("regDlg").open ||
+        $("tokDlg").open ||
+        $("pinDlg").open;
+      let rosterBusy = false;
+      async function refreshRoster() {
+        if (rosterBusy || anyDialogOpen()) return;
+        rosterBusy = true;
+        try {
+          const list = await api("getRoster");
+          if (anyDialogOpen()) return; // người dùng vừa mở hộp thoại trong lúc chờ: bỏ lượt này
+          if (syncRoster(list)) {
+            await loadData();
+            if (!anyDialogOpen()) render();
+          }
+        } catch (e) {
+        } finally {
+          rosterBusy = false;
+        }
+      }
       // Dữ liệu khuôn mặt có thể là 1 vector (dạng cũ) hoặc nhiều vector (dạng mới, mỗi góc mặt một vector)
       const parseDescs = (s) => {
         const a = JSON.parse(s);
@@ -1048,6 +1085,7 @@
           name: e.name,
           status: e.status,
           descs: e.desc ? parseDescs(e.desc) : [], // chưa đăng ký mặt thì không có mẫu
+          face: e.face || 0, // phiên bản dữ liệu mặt trên server (để phát hiện thay đổi)
         }));
         applyPending(); // giữ lại trạng thái tạm của các lần chấm công chưa kịp đồng bộ
       }
@@ -1968,6 +2006,31 @@
       window.addEventListener("online", processQueue);
 
       /* ---------- Khởi động ---------- */
+      async function loadFaceModels() {
+        if (typeof faceapi === "undefined") {
+          throw new Error("face-api.js did not load");
+        }
+        await faceapi.tf.ready();
+        const backend = faceapi.tf.getBackend();
+        console.log("TF backend:", backend); // nên là "webgl"
+
+        if (backend === "webgl" && !FORCE_TINY) {
+          await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+          DET_OPTS = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 });
+          DET_NAME = "ssd";
+        } else {
+          // Không có WebGL: dùng bộ phát hiện nhẹ để quét kịp trong 10 giây
+          await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+          DET_OPTS = new faceapi.TinyFaceDetectorOptions({
+            inputSize: 416,
+            scoreThreshold: 0.7,
+          });
+          DET_NAME = "tiny";
+        }
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+      }
+
       async function init() {
         if (!API_URL || API_URL.indexOf("DAN_URL") === 0) {
           throw new Error("API_URL is not set in index.html.");
@@ -1989,49 +2052,30 @@
         }
         render();
 
-        await faceapi.tf.ready();
-        const backend = faceapi.tf.getBackend();
-        console.log("TF backend:", backend); // nên là "webgl"
+        // Danh sách (từ M_Employee) và chấm công bằng PIN dùng được ngay, không cần chờ model khuôn mặt.
+        // Mỗi 60 giây (và khi màn hình hiện lại) cập nhật tên / trạng thái / khuôn mặt mới từ server.
+        setInterval(refreshRoster, 60000);
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") refreshRoster();
+        });
+        $("actNote").textContent =
+          "Loading face recognition... PIN check-in is available now.";
 
-        if (backend === "webgl" && !FORCE_TINY) {
-          await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-        } else {
-          // Không có WebGL: dùng bộ phát hiện nhẹ để quét kịp trong 10 giây
-          await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-          DET_OPTS = new faceapi.TinyFaceDetectorOptions({
-            inputSize: 416,
-            scoreThreshold: 0.7,
-          });
-          DET_NAME = "tiny";
+        try {
+          await loadFaceModels();
+          ready = true;
+          $("btnIn").disabled = false;
+          $("btnOut").disabled = false;
+          $("actNote").hidden = true;
+          if ($("pinDlg").open) pcRefresh(); // mở sẵn hộp PIN: bật icon khuôn mặt
+        } catch (e) {
+          $("actNote").textContent =
+            "Face recognition is unavailable (" +
+            errText(e) +
+            "). PIN check-in still works.";
+        } finally {
+          processQueue(); // gửi các bản ghi còn tồn từ lần trước (nếu có)
         }
-        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-        await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-        ready = true;
-
-        $("btnIn").disabled = false;
-        $("btnOut").disabled = false;
-        $("actNote").hidden = true;
-        processQueue(); // gửi các bản ghi còn tồn từ lần trước (nếu có)
-
-        // Mỗi 60 giây cập nhật trạng thái; mỗi 10 phút tải lại cả danh sách (nhận người mới đăng ký ở thiết bị khác)
-        let n = 0;
-        setInterval(async () => {
-          if (
-            !ready ||
-            $("scanDlg").open ||
-            $("regDlg").open ||
-            $("tokDlg").open ||
-            $("pinDlg").open
-          )
-            return;
-          try {
-            n++;
-            if (n % 10 === 0) {
-              await loadData();
-              render();
-            } else applyStatuses(await api("getStatuses"));
-          } catch (e) {}
-        }, 60000);
       }
       init().catch((e) => {
         $("listNote").hidden = false;
