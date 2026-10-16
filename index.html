@@ -610,12 +610,12 @@
         opacity: 0.35;
         cursor: not-allowed;
       }
-      /* Giống nút Clock in / Clock out bên ngoài: nền --surface-3, bấm xuống thì chuyển sang màu chính */
+      /* Giống nút Clock in / Clock out bên ngoài: nền tím --primary (giống nút Save), bấm xuống thì đậm hơn */
       .act.in:not(:disabled),
       .act.out:not(:disabled) {
-        background: var(--surface-3);
-        border-color: var(--surface-3);
-        color: var(--text);
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
       }
       .act.in:hover:not(:disabled),
       .act.out:hover:not(:disabled) {
@@ -623,8 +623,8 @@
       }
       .act.in:active:not(:disabled),
       .act.out:active:not(:disabled) {
-        background: var(--primary);
-        border-color: var(--primary);
+        background: var(--primary-dark);
+        border-color: var(--primary-dark);
         color: #fff;
       }
       .dots {
