@@ -587,20 +587,42 @@
         cursor: pointer;
         font-size: 16px;
         font-weight: 700;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
         background: var(--surface-2);
         color: var(--text);
-        border: 1px solid var(--border);
+        border: 2px solid var(--border);
+        transition: all 0.15s ease;
+      }
+      .act::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.5;
       }
       .act:disabled {
-        opacity: 0.3;
+        opacity: 0.35;
         cursor: not-allowed;
       }
-      .act.in:not(:disabled) {
-        background: var(--green);
-        border-color: var(--green);
-        color: #fff;
-      }
+      /* Giống nút Clock in / Clock out bên ngoài: nền --surface-3, bấm xuống thì chuyển sang màu chính */
+      .act.in:not(:disabled),
       .act.out:not(:disabled) {
+        background: var(--surface-3);
+        border-color: var(--surface-3);
+        color: var(--text);
+      }
+      .act.in:hover:not(:disabled),
+      .act.out:hover:not(:disabled) {
+        filter: brightness(1.1);
+      }
+      .act.in:active:not(:disabled),
+      .act.out:active:not(:disabled) {
         background: var(--primary);
         border-color: var(--primary);
         color: #fff;
