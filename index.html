@@ -780,17 +780,8 @@
         </form>
                 <div id="regConfirm" hidden>
           <p class="regWarn">
-            This staff already registered a face. Overwrite the face and PIN?
+            This staff already registered a face. Overwrite the face?
           </p>
-          <form class="reg" autocomplete="off" onsubmit="return false">
-            <input
-              id="newPin"
-              type="password"
-              inputmode="numeric"
-              maxlength="4"
-              placeholder="New PIN (optional, 4 digits)"
-            />
-          </form>
           <p id="confirmMsg" class="regMsg"></p>
           <div class="two">
             <button id="regNo" class="ghost" type="button">Cancel</button>
@@ -1573,7 +1564,7 @@
         }
         pcBusy = false;
         $("pinDlg").close();
-        doRegister(emp.id, pin, "", !!(r && r.exists));
+        doRegister(emp.id, pin, !!(r && r.exists));
       }
 
       [..."123456789", "c", "0", "b"].forEach((k) => {
@@ -1611,7 +1602,6 @@
 
       $("openReg").addEventListener("click", () => {
         $("regForm").reset();
-        $("newPin").value = "";
         $("confirmMsg").textContent = "";
         regPending = null;
         regSay("");
@@ -1644,34 +1634,22 @@
         if (r && r.exists) {
           // Đã đăng ký: hỏi có ghi đè không
           regPending = { id, pin };
-          $("newPin").value = "";
-          $("confirmMsg").textContent = "";
+            $("confirmMsg").textContent = "";
           regStep(true);
           return;
         }
         if (document.activeElement) document.activeElement.blur();
         $("regDlg").close();
-        doRegister(id, pin, "", false);
+        doRegister(id, pin, false);
       }
 
       $("regYes").addEventListener("click", () => {
         if (!regPending) return;
-        const newPin = $("newPin").value.trim();
-        if (newPin && !/^\d{4}$/.test(newPin)) {
-          $("confirmMsg").textContent = "New PIN must be 4 digits.";
-          return;
-        }
         const { id, pin } = regPending;
         regPending = null;
         if (document.activeElement) document.activeElement.blur();
         $("regDlg").close();
-        doRegister(id, pin, newPin, true);
-      });
-
-      $("newPin").addEventListener("input", () => {
-        const el = $("newPin");
-        el.value = el.value.replace(/\D/g, "").slice(0, 4);
-        $("confirmMsg").textContent = "";
+        doRegister(id, pin, true);
       });
 
       $("regForm").addEventListener("submit", (ev) => {
@@ -1766,9 +1744,9 @@
         return { samples };
       }
 
-      async function doRegister(id, pin, newPin, overwrite) {
+      async function doRegister(id, pin, overwrite) {
         const token = ++scanToken;
-        lastAction = () => doRegister(id, pin, newPin, overwrite);
+        lastAction = () => doRegister(id, pin, overwrite);
         openScan(
           overwrite ? "Update" : "Register",
           "Look straight at the camera and hold still.",
@@ -1803,7 +1781,6 @@
             id,
             descJson: JSON.stringify(vecs),
             pin,
-            newPin,
             overwrite,
           });
           const descs = vecs.map((v) => new Float32Array(v));
