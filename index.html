@@ -131,11 +131,14 @@
         flex-direction: column;
         min-height: 0;
       }
+      /* Tỷ lệ chiều cao: 1. Members 65 : 2. Clock action 35 (đổi hai số đầu của flex để chỉnh tỷ lệ).
+         Members nhiều người hơn khung thì danh sách tự cuộn. */
       main > .panel:first-child {
-        flex: 1;
+        flex: 65 1 0;
       }
       main > .panel:last-child {
-        flex: 0 0 auto;
+        flex: 35 1 0;
+        min-height: 180px;
       }
       .panel > button {
         flex-shrink: 0;
@@ -163,20 +166,20 @@
         list-style: none;
         margin: 0;
         padding: 0 2px 0 0;
-        flex: 1;
+        flex: 0 1 auto;
         min-height: 0;
         overflow-y: auto;
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: 10px;
         align-content: start;
       }
       .row {
         display: flex;
         align-items: center;
-        gap: 14px;
+        gap: 10px;
         min-height: 56px;
-        padding: 12px 16px;
+        padding: 12px;
         background: var(--surface-2);
         border: 2px solid var(--border);
         border-radius: 12px;
@@ -247,24 +250,36 @@
           background: var(--surface-2);
         }
       }
+      .hdrRight {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
       .add {
-        display: block;
-        margin: 12px auto 0;
-        width: 40px;
-        height: 40px;
+        width: 36px;
+        height: 36px;
+        padding: 0;
         border-radius: 50%;
-        border: 1px solid var(--border);
+        border: 1px solid rgba(255, 255, 255, 0.6);
         background: transparent;
-        color: var(--text-sub);
+        color: #fff;
         font-size: 22px;
         line-height: 1;
         cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .add:hover {
+        background: rgba(255, 255, 255, 0.15);
       }
 
       /* Clock action */
       .btns {
         display: flex;
         gap: 16px;
+        flex: 1;
+        min-height: 0;
       }
       .big {
         flex: 1;
@@ -658,9 +673,20 @@
     <header class="header">
       <div class="in">
         <div class="title">Attendance Clock</div>
-        <div class="when">
-          <div id="clock" class="clock">--:--:--</div>
-          <div id="date" class="date">&nbsp;</div>
+        <div class="hdrRight">
+          <button
+            id="openReg"
+            class="add"
+            type="button"
+            aria-label="Register New Member"
+            title="Register New Member"
+          >
+            +
+          </button>
+          <div class="when">
+            <div id="clock" class="clock">--:--:--</div>
+            <div id="date" class="date">&nbsp;</div>
+          </div>
         </div>
       </div>
     </header>
@@ -670,15 +696,6 @@
         <h2 class="label">1. Members</h2>
         <p id="listNote" class="note">Loading...</p>
         <ul id="list"></ul>
-        <button
-          id="openReg"
-          class="add"
-          type="button"
-          aria-label="Register New Member"
-          title="Register New Member"
-        >
-          +
-        </button>
       </section>
 
       <section class="panel">
@@ -1474,7 +1491,7 @@
           pin = pcBuf;
         pcBusy = true;
         pcRefresh();
-        pcSay("Checking...");
+        pcSay("Verifying PIN to register face...");
         let r;
         try {
           r = await api("checkRegister", { id: emp.id, pin }); // server kiểm tra PIN + đã có mặt chưa
