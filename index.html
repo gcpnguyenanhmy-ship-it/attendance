@@ -525,25 +525,64 @@
         color: var(--primary-light);
         min-height: 21px;
       }
-      .pcAct {
-        margin-bottom: 18px;
+      .pcTop {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .pcTop .pcTitle {
+        flex: 1;
+      }
+      .pcIcon {
+        flex: none;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border-radius: 50%;
+        border: 1px solid var(--border);
+        background: var(--surface-2);
+        color: var(--text-sub);
+        font-size: 26px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .pcIcon svg {
+        width: 24px;
+        height: 24px;
+      }
+      #pcFace:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+      #pcFace:not(:disabled) {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: #fff;
       }
       .act {
-        min-height: 46px;
+        min-height: 54px;
         border-radius: 12px;
         cursor: pointer;
-        font-size: 15px;
+        font-size: 16px;
         font-weight: 700;
         background: var(--surface-2);
         color: var(--text);
         border: 1px solid var(--border);
       }
-      .act.sel.in {
+      .act:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+      .act.in:not(:disabled) {
         background: var(--green);
         border-color: var(--green);
         color: #fff;
       }
-      .act.sel.out {
+      .act.out:not(:disabled) {
         background: var(--primary);
         border-color: var(--primary);
         color: #fff;
@@ -595,10 +634,6 @@
       }
       .pcFoot {
         margin-top: 14px;
-      }
-      #pcCancel {
-        color: var(--primary-light);
-        border-color: var(--border);
       }
 
       button:focus-visible,
@@ -726,20 +761,48 @@
     <!-- Chấm công bằng PIN -->
     <dialog id="pinDlg">
       <div class="dlg">
-        <h2 class="pcTitle">Enter PIN</h2>
-        <p id="pcSub" class="pcSub"></p>
-        <div class="two pcAct">
-          <button id="pcIn" class="act in" type="button">Check in</button>
-          <button id="pcOut" class="act out" type="button">Check out</button>
+        <div class="pcTop">
+          <button
+            id="pcFace"
+            class="pcIcon"
+            type="button"
+            disabled
+            aria-label="Register / change face"
+            title="Register / change face"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"
+              />
+              <path d="M9 10v1M15 10v1M9.5 15c.7.7 1.5 1 2.5 1s1.8-.3 2.5-1" />
+            </svg>
+          </button>
+          <h2 class="pcTitle">Enter PIN</h2>
+          <button id="pcClose" class="pcIcon" type="button" aria-label="Close">
+            &times;
+          </button>
         </div>
+        <p id="pcSub" class="pcSub"></p>
         <div id="pcDots" class="dots">
           <span></span><span></span><span></span><span></span>
         </div>
         <p id="pcMsg" class="hint"></p>
         <div id="pcKeys" class="keys"></div>
         <div class="two pcFoot">
-          <button id="pcCancel" class="ghost" type="button">Cancel</button>
-          <button id="pcOk" class="solid" type="button" disabled>OK</button>
+          <button id="pcIn" class="act in" type="button" disabled>
+            Clock in
+          </button>
+          <button id="pcOut" class="act out" type="button" disabled>
+            Clock out
+          </button>
         </div>
       </div>
     </dialog>
@@ -957,7 +1020,7 @@
           id: e.id,
           name: e.name,
           status: e.status,
-          descs: parseDescs(e.desc),
+          descs: e.desc ? parseDescs(e.desc) : [], // chưa đăng ký mặt thì không có mẫu
         }));
         applyPending(); // giữ lại trạng thái tạm của các lần chấm công chưa kịp đồng bộ
       }
@@ -1316,20 +1379,19 @@
 
       /* ---------- Chấm công bằng PIN ---------- */
       let pcEmp = null,
-        pcType = null,
         pcBuf = "",
         pcBusy = false;
 
       function pcRefresh() {
-        $("pcSub").textContent =
-          (pcType ? (pcType === "IN" ? "Check in" : "Check out") + " — " : "") +
-          (pcEmp ? pcEmp.name : "");
+        $("pcSub").textContent = pcEmp ? pcEmp.name : "";
         [...$("pcDots").children].forEach((d, i) =>
           d.classList.toggle("on", i < pcBuf.length),
         );
-        $("pcIn").classList.toggle("sel", pcType === "IN");
-        $("pcOut").classList.toggle("sel", pcType === "OUT");
-        $("pcOk").disabled = pcBusy || !pcType || pcBuf.length !== 4;
+        // Clock in / Clock out / icon khuôn mặt chỉ sáng lên khi đã nhập đủ 4 số
+        const full = !pcBusy && pcBuf.length === 4;
+        $("pcIn").disabled = !full;
+        $("pcOut").disabled = !full;
+        $("pcFace").disabled = !full || !ready;
       }
       function pcSay(t, err) {
         $("pcMsg").textContent = t || "";
@@ -1337,10 +1399,9 @@
       }
       function openPanel(emp) {
         pcEmp = emp;
-        pcType = null;
         pcBuf = "";
         pcBusy = false;
-        pcSay("Choose an action and enter your PIN");
+        pcSay("Enter your PIN");
         pcRefresh();
         render(); // làm sáng box tên đang chọn
         $("pinDlg").showModal();
@@ -1362,12 +1423,11 @@
         pcSay("");
         pcRefresh();
       }
-      async function pcSubmit() {
-        if (pcBusy || !pcType || pcBuf.length !== 4) return;
+      async function pcSubmit(type) {
+        if (pcBusy || !pcEmp || pcBuf.length !== 4) return;
         const emp = pcEmp,
-          type = pcType,
           st = emp.status;
-        const label = type === "IN" ? "Check in" : "Check out";
+        const label = type === "IN" ? "Clock in" : "Clock out";
 
         // Trạng thái không hợp lệ thì báo lỗi ngay, không cần gửi PIN
         let pre = null;
@@ -1407,6 +1467,28 @@
         }
       }
 
+      // Đăng ký / đổi khuôn mặt cho người đang chọn (đã nhập đúng PIN). Đã có mặt thì ghi đè.
+      async function pcRegisterFace() {
+        if (pcBusy || !pcEmp || pcBuf.length !== 4 || !ready) return;
+        const emp = pcEmp,
+          pin = pcBuf;
+        pcBusy = true;
+        pcRefresh();
+        pcSay("Checking...");
+        let r;
+        try {
+          r = await api("checkRegister", { id: emp.id, pin }); // server kiểm tra PIN + đã có mặt chưa
+        } catch (e) {
+          pcBuf = "";
+          pcBusy = false;
+          pcRefresh();
+          return pcSay(errText(e), true);
+        }
+        pcBusy = false;
+        $("pinDlg").close();
+        doRegister(emp.id, pin, "", !!(r && r.exists));
+      }
+
       [..."123456789", "c", "0", "b"].forEach((k) => {
         const b = document.createElement("button");
         b.type = "button";
@@ -1415,20 +1497,17 @@
         b.addEventListener("click", () => pcPress(k));
         $("pcKeys").appendChild(b);
       });
-      $("pcIn").addEventListener("click", () => {
-        pcType = "IN";
-        pcRefresh();
+      $("pcIn").addEventListener("click", () => pcSubmit("IN"));
+      $("pcOut").addEventListener("click", () => pcSubmit("OUT"));
+      $("pcFace").addEventListener("click", pcRegisterFace);
+      $("pcClose").addEventListener("click", () => $("pinDlg").close());
+      // bấm ra ngoài hộp thoại (lên lớp nền) cũng đóng
+      $("pinDlg").addEventListener("click", (ev) => {
+        if (ev.target === $("pinDlg") && !pcBusy) $("pinDlg").close();
       });
-      $("pcOut").addEventListener("click", () => {
-        pcType = "OUT";
-        pcRefresh();
-      });
-      $("pcOk").addEventListener("click", pcSubmit);
-      $("pcCancel").addEventListener("click", () => $("pinDlg").close());
       $("pinDlg").addEventListener("close", () => {
         pcEmp = null; // tắt highlight
         pcBuf = "";
-        pcType = null;
         pcBusy = false;
         render();
       });
