@@ -616,9 +616,15 @@
         border-color: #fff;
         color: #fff;
       }
-      .act.dim,
-      #pcFace.dim {
-        opacity: 0.35;
+      /* Nút không được chọn: tối đi nhưng vẫn nhìn thấy rõ (nền tối + chữ xám), không dùng độ trong suốt */
+      .act.in.dim:not(:disabled),
+      .act.out.dim:not(:disabled),
+      #pcFace.dim:not(:disabled) {
+        background: var(--surface-2);
+        border-color: var(--border);
+        color: var(--text-sub);
+        opacity: 1;
+        filter: none;
       }
       #pcFace.chosen {
         background: var(--primary-dark);
