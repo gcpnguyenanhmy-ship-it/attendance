@@ -1438,6 +1438,9 @@
         $("pcIn").classList.toggle("chosen", pcAct === "IN");
         $("pcOut").classList.toggle("chosen", pcAct === "OUT");
         $("pcFace").classList.toggle("chosen", pcAct === "FACE");
+        // Ẩn ô nhập PIN (4 chấm + bàn phím) cho tới khi chọn một nút chức năng
+        $("pcDots").hidden = !pcAct;
+        $("pcKeys").hidden = !pcAct;
       }
       function pcSay(t, err) {
         $("pcMsg").textContent = t || "";
@@ -1448,7 +1451,7 @@
         pcBuf = "";
         pcBusy = false;
         pcAct = null;
-        pcSay("Choose an action, then enter your PIN");
+        pcSay("Choose an action");
         pcRefresh();
         render(); // làm sáng box tên đang chọn
         $("pinDlg").showModal();
