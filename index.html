@@ -257,24 +257,6 @@
         align-items: center;
         gap: 18px;
       }
-      .add {
-        width: 36px;
-        height: 36px;
-        padding: 0;
-        border-radius: 50%;
-        border: 1px solid rgba(255, 255, 255, 0.6);
-        background: transparent;
-        color: #fff;
-        font-size: 22px;
-        line-height: 1;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .add:hover {
-        background: rgba(255, 255, 255, 0.15);
-      }
 
       /* Clock action */
       .btns {
@@ -691,7 +673,6 @@
           stroke-dashoffset: 0;
         }
       }
-     .regWarn { margin: 12px 0 4px; color: var(--primary-light); font-size: 15px; }
     </style>
   </head>
   <body>
@@ -703,15 +684,6 @@
             <div id="clock" class="clock">--:--:--</div>
             <div id="date" class="date">&nbsp;</div>
           </div>
-          <button
-            id="openReg"
-            class="add"
-            type="button"
-            aria-label="Register New Member"
-            title="Register New Member"
-          >
-            +
-          </button>
         </div>
       </div>
     </header>
@@ -754,38 +726,6 @@
           <div id="resBtns" class="two">
             <button id="retry" class="solid" type="button">Retry</button>
             <button id="done" class="ghost" type="button">Close</button>
-          </div>
-        </div>
-      </div>
-    </dialog>
-
-    <!-- Đăng ký nhân viên -->
-    <dialog id="regDlg">
-      <div class="dlg">
-        <h2>Register</h2>
-        <form id="regForm" class="reg" autocomplete="off">
-          <input id="rid" placeholder="Staff Code" />
-          <input
-            id="pin"
-            type="password"
-            inputmode="numeric"
-            maxlength="4"
-            placeholder="Enter your PIN"
-          />
-          <p id="regMsg" class="regMsg"></p>
-          <div class="two">
-            <button id="regCancel" class="ghost" type="button">Cancel</button>
-            <button class="solid" type="submit">Open camera</button>
-          </div>
-        </form>
-                <div id="regConfirm" hidden>
-          <p class="regWarn">
-            This staff already registered a face. Overwrite the face?
-          </p>
-          <p id="confirmMsg" class="regMsg"></p>
-          <div class="two">
-            <button id="regNo" class="ghost" type="button">Cancel</button>
-            <button id="regYes" class="solid" type="button">Overwrite</button>
           </div>
         </div>
       </div>
@@ -836,6 +776,18 @@
           <button id="pcOut" class="act out" type="button" disabled>
             Clock out
           </button>
+        </div>
+      </div>
+    </dialog>
+    
+    <!-- Xác nhận ghi đè khuôn mặt -->
+    <dialog id="ovwDlg">
+      <div class="dlg">
+        <h2>Overwrite face?</h2>
+        <p id="ovwText" class="hint"></p>
+        <div class="two">
+          <button id="ovwNo" class="ghost" type="button">Cancel</button>
+          <button id="ovwYes" class="solid" type="button">Overwrite</button>
         </div>
       </div>
     </dialog>
@@ -1067,9 +1019,9 @@
       }
       const anyDialogOpen = () =>
         $("scanDlg").open ||
-        $("regDlg").open ||
         $("tokDlg").open ||
-        $("pinDlg").open;
+        $("pinDlg").open ||
+        $("ovwDlg").open;
       let rosterBusy = false;
       async function refreshRoster() {
         if (rosterBusy || anyDialogOpen()) return;
@@ -1564,8 +1516,27 @@
         }
         pcBusy = false;
         $("pinDlg").close();
-        doRegister(emp.id, pin, !!(r && r.exists));
+        if (r && r.exists) {
+          // Đã có khuôn mặt: hỏi xác nhận trước khi mở camera
+          ovwPending = { id: emp.id, pin };
+          $("ovwText").textContent =
+            emp.name + " already registered a face. Overwrite it with a new one?";
+          $("ovwDlg").showModal();
+          return;
+        }
+        doRegister(emp.id, pin, false);
       }
+      let ovwPending = null; // {id, pin} đang chờ xác nhận ghi đè
+      $("ovwNo").addEventListener("click", () => $("ovwDlg").close());
+      $("ovwYes").addEventListener("click", () => {
+        if (!ovwPending) return;
+        const { id, pin } = ovwPending;
+        $("ovwDlg").close();
+        doRegister(id, pin, true);
+      });
+      $("ovwDlg").addEventListener("close", () => {
+        ovwPending = null; // đóng bằng nút Cancel hay phím Esc đều dọn sạch
+      });
 
       [..."123456789", "c", "0", "b"].forEach((k) => {
         const b = document.createElement("button");
@@ -1590,80 +1561,6 @@
         render();
       });
 
-      /* ---------- Đăng ký nhân viên ---------- */
-            let regBusy = false; // chặn gửi trùng khi vừa nhập đủ 4 số vừa bấm Enter
-      let regPending = null; // {id, pin} đang chờ xác nhận ghi đè
-      const regSay = (t) => ($("regMsg").textContent = t);
-
-      function regStep(confirm) {
-        $("regForm").hidden = confirm;
-        $("regConfirm").hidden = !confirm;
-      }
-
-      $("openReg").addEventListener("click", () => {
-        $("regForm").reset();
-        $("confirmMsg").textContent = "";
-        regPending = null;
-        regSay("");
-        regStep(false);
-        $("regDlg").showModal();
-      });
-      $("regCancel").addEventListener("click", () => $("regDlg").close());
-      $("regNo").addEventListener("click", () => $("regDlg").close());
-
-      async function submitRegister() {
-        if (regBusy) return;
-        const id = $("rid").value.trim(),
-          pin = $("pin").value.trim();
-        if (!id) {
-          regSay("Please enter your staff code.");
-          return $("rid").focus();
-        }
-        if (!/^\d{4}$/.test(pin)) return regSay("PIN must be 4 digits.");
-
-        regBusy = true;
-        let r;
-        try {
-          r = await api("checkRegister", { id, pin });
-        } catch (e) {
-          regBusy = false;
-          return regSay(errText(e));
-        }
-        regBusy = false;
-
-        if (r && r.exists) {
-          // Đã đăng ký: hỏi có ghi đè không
-          regPending = { id, pin };
-            $("confirmMsg").textContent = "";
-          regStep(true);
-          return;
-        }
-        if (document.activeElement) document.activeElement.blur();
-        $("regDlg").close();
-        doRegister(id, pin, false);
-      }
-
-      $("regYes").addEventListener("click", () => {
-        if (!regPending) return;
-        const { id, pin } = regPending;
-        regPending = null;
-        if (document.activeElement) document.activeElement.blur();
-        $("regDlg").close();
-        doRegister(id, pin, true);
-      });
-
-      $("regForm").addEventListener("submit", (ev) => {
-        ev.preventDefault();
-        submitRegister();
-      });
-
-      // Chỉ nhận chữ số, đủ 4 số thì tự chạy
-      $("pin").addEventListener("input", () => {
-        const el = $("pin");
-        el.value = el.value.replace(/\D/g, "").slice(0, 4);
-        regSay("");
-        if (el.value.length === 4) submitRegister();
-      });
 
       /* ---------- Đăng ký nhiều góc mặt ---------- */
       const FRONT_SAMPLES = 4; // số mẫu khi nhìn thẳng (góc dùng nhiều nhất nên lấy nhiều hơn)
@@ -1791,9 +1688,8 @@
           } else {
             employees.push({ id, name: empName, descs, status: null });
           }
-
-          $("regForm").reset();
           render(id);
+          
           showResult({
             ok: true,
             kind: "in",
