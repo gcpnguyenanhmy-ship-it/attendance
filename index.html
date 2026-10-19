@@ -685,6 +685,52 @@
         margin-top: 14px;
       }
 
+      /* Màn hình thấp (cửa sổ nhỏ / tablet nằm ngang): thu gọn hộp PIN để hai nút Clock in / Clock out luôn nằm trong khung nhìn */
+      @media (max-height: 640px) {
+        #pinDlg .dlg {
+          padding: 12px 16px;
+        }
+        #pinDlg .pcIcon {
+          width: 38px;
+          height: 38px;
+        }
+        #pinDlg .pcTitle {
+          font-size: 19px;
+        }
+        #pinDlg .pcSub {
+          margin: 0 0 6px;
+          min-height: 18px;
+          font-size: 13px;
+        }
+        #pinDlg .dots {
+          gap: 14px;
+          margin: 0 0 2px;
+        }
+        #pinDlg .dots span {
+          width: 12px;
+          height: 12px;
+        }
+        #pinDlg #pcMsg {
+          min-height: 18px;
+          margin: 0 0 6px;
+          font-size: 13px;
+        }
+        #pinDlg .keys {
+          gap: 6px;
+        }
+        #pinDlg .key {
+          min-height: 38px;
+          font-size: 18px;
+        }
+        #pinDlg .pcFoot {
+          margin-top: 8px;
+        }
+        #pinDlg .act {
+          min-height: 44px;
+          font-size: 15px;
+        }
+      }
+
       button:focus-visible,
       input:focus-visible {
         outline: 2px solid var(--avatar);
@@ -2038,7 +2084,7 @@
             errText(e) +
             "). PIN check-in still works.";
         } finally {
-          processQueue(); // gửi các bản ghi còn tồn từ lần trước (nếu có!) 
+          processQueue(); // gửi các bản ghi còn tồn từ lần trước (nếu có)
         }
       }
       init().catch((e) => {
