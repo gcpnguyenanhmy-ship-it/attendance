@@ -616,6 +616,10 @@
         border-color: #fff;
         color: #fff;
       }
+      .act.dim,
+      #pcFace.dim {
+        opacity: 0.35;
+      }
       #pcFace.chosen {
         background: var(--primary-dark);
         border-color: #fff;
@@ -1443,6 +1447,10 @@
         $("pcIn").classList.toggle("chosen", pcAct === "IN");
         $("pcOut").classList.toggle("chosen", pcAct === "OUT");
         $("pcFace").classList.toggle("chosen", pcAct === "FACE");
+        // Đã chọn một chức năng thì hai nút còn lại tối đi (vẫn bấm được để đổi lựa chọn)
+        $("pcIn").classList.toggle("dim", !!pcAct && pcAct !== "IN");
+        $("pcOut").classList.toggle("dim", !!pcAct && pcAct !== "OUT");
+        $("pcFace").classList.toggle("dim", !!pcAct && pcAct !== "FACE");
         // Chọn một nút thì hai nút còn lại ẩn đi (icon khuôn mặt dùng visibility để tiêu đề không bị lệch)
         const foot = $("pcIn").parentElement;
         $("pcIn").hidden = !!pcAct && pcAct !== "IN";
