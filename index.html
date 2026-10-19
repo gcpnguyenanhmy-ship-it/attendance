@@ -621,6 +621,11 @@
         border-color: #fff;
         color: #fff;
       }
+      /* Ô nhập PIN bị khóa (làm mờ) khi chưa chọn nút chức năng */
+      .locked {
+        opacity: 0.3;
+        pointer-events: none;
+      }
       .dots {
         display: flex;
         justify-content: center;
@@ -1438,9 +1443,12 @@
         $("pcIn").classList.toggle("chosen", pcAct === "IN");
         $("pcOut").classList.toggle("chosen", pcAct === "OUT");
         $("pcFace").classList.toggle("chosen", pcAct === "FACE");
-        // Ẩn ô nhập PIN (4 chấm + bàn phím) cho tới khi chọn một nút chức năng
-        $("pcDots").hidden = !pcAct;
-        $("pcKeys").hidden = !pcAct;
+        // Làm mờ ô nhập PIN (4 chấm + bàn phím) và khóa không cho bấm cho tới khi chọn một nút chức năng
+        $("pcDots").classList.toggle("locked", !pcAct);
+        $("pcKeys").classList.toggle("locked", !pcAct);
+        $("pcKeys")
+          .querySelectorAll("button")
+          .forEach((b) => (b.disabled = !pcAct));
       }
       function pcSay(t, err) {
         $("pcMsg").textContent = t || "";
@@ -1451,7 +1459,7 @@
         pcBuf = "";
         pcBusy = false;
         pcAct = null;
-        pcSay("Choose an action");
+        pcSay("Choose an action, then enter your PIN");
         pcRefresh();
         render(); // làm sáng box tên đang chọn
         $("pinDlg").showModal();
@@ -1466,7 +1474,7 @@
         if (!$("scanDlg").open) $("scanDlg").showModal();
       }
       function pcPress(k) {
-        if (pcBusy) return;
+        if (pcBusy || !pcAct) return; // chưa chọn chức năng thì không nhập PIN
         if (k === "c") pcBuf = "";
         else if (k === "b") pcBuf = pcBuf.slice(0, -1);
         else if (pcBuf.length < 4) pcBuf += k;
