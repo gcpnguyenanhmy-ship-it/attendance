@@ -1443,6 +1443,13 @@
         $("pcIn").classList.toggle("chosen", pcAct === "IN");
         $("pcOut").classList.toggle("chosen", pcAct === "OUT");
         $("pcFace").classList.toggle("chosen", pcAct === "FACE");
+        // Chọn một nút thì hai nút còn lại ẩn đi (icon khuôn mặt dùng visibility để tiêu đề không bị lệch)
+        const foot = $("pcIn").parentElement;
+        $("pcIn").hidden = !!pcAct && pcAct !== "IN";
+        $("pcOut").hidden = !!pcAct && pcAct !== "OUT";
+        $("pcFace").style.visibility = pcAct && pcAct !== "FACE" ? "hidden" : "";
+        foot.hidden = pcAct === "FACE"; // chọn khuôn mặt: cả hai nút Clock in/out đều ẩn
+        foot.style.gridTemplateColumns = pcAct ? "1fr" : ""; // còn một nút thì cho rộng hết hàng
         // Làm mờ ô nhập PIN (4 chấm + bàn phím) và khóa không cho bấm cho tới khi chọn một nút chức năng
         $("pcDots").classList.toggle("locked", !pcAct);
         $("pcKeys").classList.toggle("locked", !pcAct);
@@ -1488,6 +1495,13 @@
       // Bấm nút chức năng: nếu đã nhập đủ PIN thì chạy ngay, chưa thì ghi nhớ chức năng rồi chờ nhập PIN
       function pcChoose(act) {
         if (pcBusy) return;
+        if (pcAct === act) {
+          // Bấm lại nút đang chọn: bỏ chọn, hiện lại cả ba nút và xóa PIN đã nhập
+          pcAct = null;
+          pcBuf = "";
+          pcSay("Choose an action, then enter your PIN");
+          return pcRefresh();
+        }
         if (pcBuf.length === 4) return pcRun(act);
         pcAct = act;
         pcSay("Enter your PIN to " + PC_LABEL[act]);
