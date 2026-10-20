@@ -1740,6 +1740,21 @@
           const vecs = cap.samples.map((s) =>
             Array.from(s, (v) => +v.toFixed(4)),
           );
+          // Chặn một khuôn mặt đăng ký cho hai mã: so với mẫu của mọi mã khác (server kiểm tra lại)
+          const clash = employees.find(
+            (e) =>
+              e.id !== id &&
+              e.descs &&
+              e.descs.some((d) =>
+                vecs.some((v) => faceapi.euclideanDistance(v, d) <= THRESHOLD),
+              ),
+          );
+          if (clash)
+            return showResult({
+              ok: false,
+              title: "Registration Fail",
+              sub: "This face is already registered under another staff code.",
+            });
           const empName = await api("registerEmployee", {
             id,
             descJson: JSON.stringify(vecs),
