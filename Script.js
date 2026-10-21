@@ -11,6 +11,8 @@ const TZ = "Asia/Ho_Chi_Minh";
 const FORCE_TINY = true;
 const WARMUP_MS = 300; // chờ trước lần quét đầu tiên (để camera ổn định phơi sáng/lấy nét). Trước đây: 700
 const SCAN_GAP_MS = 100; // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
+// true: luôn giữ màn hình sáng. false: để tablet tự tắt màn hình theo thời gian chờ của thiết bị.
+const KEEP_AWAKE = false;
 /* ==================================================== */
 
 let employees = []; // {id, name, desc, status: {type,time} | null}
@@ -117,6 +119,7 @@ const api = async (action, data) => (await apiTimed(action, data)).data;
 
 /* ---------- Giữ màn hình luôn sáng (cho tablet) ---------- */
 async function keepAwake() {
+  if (!KEEP_AWAKE) return;
   try {
     if ("wakeLock" in navigator)
       await navigator.wakeLock.request("screen");
