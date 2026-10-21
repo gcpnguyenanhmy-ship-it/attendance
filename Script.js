@@ -606,6 +606,22 @@ let pcEmp = null,
   pcBusy = false,
   pcAct = null; // chức năng đã chọn trước khi nhập PIN: "IN" | "OUT" | "FACE"
 const PC_LABEL = { IN: "Clock in", OUT: "Clock out", FACE: "register face" };
+// Khóa phía kiosk khi server báo sai PIN quá 5 lần: mã nhân viên -> thời điểm hết khóa (ms).
+// Chỉ để làm mờ bàn phím; việc khóa thật vẫn do server quyết định.
+const PC_LOCK_MS = 5 * 60 * 1000;
+const PC_LOCK_MSG = "Too many wrong attempts. Try again in 5 minutes.";
+const pcLock = {};
+const pcLocked = () => !!pcEmp && (pcLock[pcEmp.id] || 0) > Date.now();
+function pcSetLock(id) {
+  pcLock[id] = Date.now() + PC_LOCK_MS;
+  setTimeout(() => {
+    // hết khóa: mở lại bàn phím nếu khung PIN đang mở cho đúng người này
+    if ($("pinDlg").open && pcEmp && pcEmp.id === id && !pcLocked()) {
+      pcSay("Choose an action, then enter your PIN");
+      pcRefresh();
+    }
+  }, PC_LOCK_MS + 500);
+}
 
 function pcRefresh() {
   $("pcSub").textContent = pcEmp ? pcEmp.name : "";
@@ -624,11 +640,12 @@ function pcRefresh() {
   $("pcOut").classList.toggle("dim", !!pcAct && pcAct !== "OUT");
   $("pcFace").classList.toggle("dim", !!pcAct && pcAct !== "FACE");
   // Làm mờ ô nhập PIN (4 chấm + bàn phím) và khóa không cho bấm cho tới khi chọn một nút chức năng
-  $("pcDots").classList.toggle("locked", !pcAct);
-  $("pcKeys").classList.toggle("locked", !pcAct);
+  const keysOff = !pcAct || pcLocked(); // chưa chọn chức năng, hoặc đang bị khóa do sai PIN
+  $("pcDots").classList.toggle("locked", keysOff);
+  $("pcKeys").classList.toggle("locked", keysOff);
   $("pcKeys")
     .querySelectorAll("button")
-    .forEach((b) => (b.disabled = !pcAct));
+    .forEach((b) => (b.disabled = keysOff));
 }
 function pcSay(t, err) {
   $("pcMsg").textContent = t || "";
@@ -639,7 +656,10 @@ function openPanel(emp) {
   pcBuf = "";
   pcBusy = false;
   pcAct = null;
-  pcSay("Choose an action, then enter your PIN");
+  pcSay(
+    pcLocked() ? PC_LOCK_MSG : "Choose an action, then enter your PIN",
+    pcLocked(),
+  );
   pcRefresh();
   render(); // làm sáng box tên đang chọn
   $("pinDlg").showModal();
@@ -654,7 +674,7 @@ function openResultFor(emp) {
   if (!$("scanDlg").open) $("scanDlg").showModal();
 }
 function pcPress(k) {
-  if (pcBusy || !pcAct) return; // chưa chọn chức năng thì không nhập PIN
+  if (pcBusy || !pcAct || pcLocked()) return; // chưa chọn chức năng hoặc đang bị khóa thì không nhập PIN
   if (k === "c") pcBuf = "";
   else if (k === "b") pcBuf = pcBuf.slice(0, -1);
   else if (pcBuf.length < 4) pcBuf += k;
@@ -677,7 +697,8 @@ function pcChoose(act) {
   }
   if (pcBuf.length === 4) return pcRun(act);
   pcAct = act;
-  pcSay("Enter your PIN to " + PC_LABEL[act]);
+  if (pcLocked()) pcSay(PC_LOCK_MSG, true);
+  else pcSay("Enter your PIN to " + PC_LABEL[act]);
   pcRefresh();
 }
 async function pcSubmit(type) {
@@ -708,10 +729,9 @@ async function pcSubmit(type) {
     }
     if (r.status === "LOCKED") {
       pcBuf = "";
-      return pcSay(
-        "Too many wrong attempts. Try again in 5 minutes.",
-        true,
-      );
+      pcSetLock(emp.id);
+      pcRefresh();
+      return pcSay(PC_LOCK_MSG, true);
     }
     openResultFor(emp);
     handleLog(emp, type, label, r); // r.status: OK hoặc UNKNOWN
@@ -738,6 +758,7 @@ async function pcRegisterFace() {
   } catch (e) {
     pcBuf = "";
     pcBusy = false;
+    if (/^Too many wrong attempts/.test(errText(e))) pcSetLock(emp.id);
     pcRefresh();
     return pcSay(errText(e), true);
   }
@@ -830,8 +851,23 @@ const POSES = [
   },
 ];
 
+// Mặt này đã đăng ký dưới một mã khác chưa? (so với mẫu của mọi mã khác ngoài ownId)
+const FACE_CLASH_MSG =
+  "This face is already registered under another staff code.";
+function faceClash(vecs, ownId) {
+  return employees.some(
+    (e) =>
+      e.id !== ownId &&
+      e.descs &&
+      e.descs.some((d) =>
+        vecs.some((v) => faceapi.euclideanDistance(v, d) <= THRESHOLD),
+      ),
+  );
+}
+
 // Trả về { samples } (mỗi mẫu là 1 vector 128 chiều), hoặc { cancelled }, hoặc { error: 'thông báo' }
-async function capturePoses(token) {
+// ownId: mã đang đăng ký, dùng để kiểm tra trùng mặt ngay sau góc nhìn thẳng
+async function capturePoses(token, ownId) {
   const samples = [];
   await sleep(700);
   for (let i = 0; i < POSES.length; i++) {
@@ -861,6 +897,9 @@ async function capturePoses(token) {
         error: `Could not capture the "${pose.name}" angle. Turn slightly in the right direction and try again.`,
       };
     }
+    if (i === 0 && faceClash(samples, ownId)) {
+      return { error: FACE_CLASH_MSG }; // dừng ngay, không quay hai góc còn lại
+    }
     if (i < POSES.length - 1) {
       $("camHint").textContent = "Good. Get ready for the next step...";
       await sleep(900);
@@ -889,7 +928,7 @@ async function doRegister(id, pin, overwrite) {
   }
 
   try {
-    const cap = await capturePoses(token);
+    const cap = await capturePoses(token, id);
     if (cap.cancelled || token !== scanToken) return;
     if (cap.error)
       return showResult({
@@ -902,20 +941,12 @@ async function doRegister(id, pin, overwrite) {
     const vecs = cap.samples.map((s) =>
       Array.from(s, (v) => +v.toFixed(4)),
     );
-    // Chặn một khuôn mặt đăng ký cho hai mã: so với mẫu của mọi mã khác (server kiểm tra lại)
-    const clash = employees.find(
-      (e) =>
-        e.id !== id &&
-        e.descs &&
-        e.descs.some((d) =>
-          vecs.some((v) => faceapi.euclideanDistance(v, d) <= THRESHOLD),
-        ),
-    );
-    if (clash)
+    // Kiểm tra lần cuối với đủ các góc (server vẫn kiểm tra lại)
+    if (faceClash(vecs, id))
       return showResult({
         ok: false,
         title: "Registration Fail",
-        sub: "This face is already registered under another staff code.",
+        sub: FACE_CLASH_MSG,
       });
     const empName = await api("registerEmployee", {
       id,
