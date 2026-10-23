@@ -11,8 +11,6 @@ const TZ = "Asia/Ho_Chi_Minh";
 const FORCE_TINY = true;
 const WARMUP_MS = 300; // chờ trước lần quét đầu tiên (để camera ổn định phơi sáng/lấy nét). Trước đây: 700
 const SCAN_GAP_MS = 100; // nghỉ giữa hai lần quét khi chấm công. Trước đây: 350
-// true: luôn giữ màn hình sáng. false: để tablet tự tắt màn hình theo thời gian chờ của thiết bị.
-const KEEP_AWAKE = false;
 /* ==================================================== */
 
 let employees = []; // {id, name, desc, status: {type,time} | null}
@@ -119,7 +117,6 @@ const api = async (action, data) => (await apiTimed(action, data)).data;
 
 /* ---------- Giữ màn hình luôn sáng (cho tablet) ---------- */
 async function keepAwake() {
-  if (!KEEP_AWAKE) return;
   try {
     if ("wakeLock" in navigator)
       await navigator.wakeLock.request("screen");
@@ -375,84 +372,8 @@ function matchEmployee(d) {
   return m.dist <= THRESHOLD ? m.emp : null;
 }
 // Thử nhận diện tối đa 10 giây; cần khớp cùng một người 2 lần liên tiếp mới chấp nhận
-// Tổng hợp số liệu đo được của một phiên quét
-function finishStats(S, t0, outcome) {
-  const now = performance.now();
-  const lat = S.lat;
-  const sum = lat.reduce((a, b) => a + b, 0);
-  const st = {
-    outcome, // 'matched' | 'unknown' | 'noface'
-    backend: faceapi.tf.getBackend(),
-    totalMs: Math.round(now - t0), // tổng thời gian từ lúc bắt đầu quét
-    attempts: S.attempts, // số lần quét
-    facesFound: S.faces, // số lần quét thấy mặt
-    firstFaceMs:
-      S.firstFaceMs === null ? null : Math.round(S.firstFaceMs), // lúc thấy mặt đầu tiên
-    matchMs: S.matchMs === null ? null : Math.round(S.matchMs), // lúc nhận ra người
-    avgLatMs: lat.length ? Math.round(sum / lat.length) : 0, // độ trễ trung bình 1 lần quét
-    minLatMs: lat.length ? Math.round(Math.min(...lat)) : 0,
-    maxLatMs: lat.length ? Math.round(Math.max(...lat)) : 0,
-    scansPerSec: +(S.attempts / ((now - t0) / 1000)).toFixed(2),
-    minDist: S.minDist === null ? null : +S.minDist.toFixed(3), // khoảng cách nhỏ nhất đo được (so với THRESHOLD)
-    minName: S.minName,
-    threshold: THRESHOLD,
-    dists: S.dists,
-    detector: DET_NAME,
-    // "1: 874ms / 0.47; 2: 752ms / -; ..." (mỗi lần quét: độ trễ / khoảng cách)
-    scansDetail: lat
-      .map(
-        (ms, i) =>
-          `${i + 1}: ${Math.round(ms)}ms / ${S.dists[i] === null ? "-" : S.dists[i]}`,
-      )
-      .join("; "),
-  };
-  return st;
-}
-// Gửi số liệu quét về Apps Script để ghi vào tab Metrics (không chặn giao diện, lỗi thì bỏ qua)
-function sendMetrics(type, res, T) {
-  const s = res && res.stats;
-  if (!s) return;
-  const emp = res.emp || null;
-  api("logMetrics", {
-    type, // IN | OUT
-    outcome: s.outcome, // matched | unknown | noface
-    id: emp ? emp.id : "",
-    name: emp ? emp.name : "",
-    nearest: s.minName || "", // người gần nhất (kể cả khi không khớp)
-    totalMs: s.totalMs,
-    attempts: s.attempts,
-    facesFound: s.facesFound,
-    avgLatMs: s.avgLatMs,
-    minLatMs: s.minLatMs,
-    maxLatMs: s.maxLatMs,
-    firstFaceMs: s.firstFaceMs,
-    matchMs: s.matchMs,
-    minDist: s.minDist,
-    threshold: s.threshold,
-    scansDetail: s.scansDetail,
-    backend: s.backend,
-    detector: s.detector,
-    device: (navigator.userAgent || "").slice(0, 120),
-    camMs: T ? T.camMs : null, // thời gian mở camera
-    logRtMs: T ? T.logRtMs : null, // logCheck: tổng thời gian khứ hồi
-    logServerMs: T ? T.logServerMs : null, // logCheck: thời gian chạy trong Apps Script
-    totalUiMs: T ? T.totalUiMs : null, // từ lúc bấm nút đến lúc có kết quả
-  }).catch((e) => console.warn("logMetrics failed:", errText(e)));
-}
-
 async function recognise(token) {
   const t0 = performance.now();
-  const S = {
-    attempts: 0,
-    faces: 0,
-    lat: [],
-    hit: [],
-    firstFaceMs: null,
-    matchMs: null,
-    dists: [],
-    minDist: null,
-    minName: "",
-  };
   let seenFace = false,
     streakId = null,
     streak = 0;
@@ -460,31 +381,15 @@ async function recognise(token) {
   while (performance.now() - t0 < 10000) {
     if (token !== scanToken) return { cancelled: true };
 
-    const a0 = performance.now();
     const d = await getDescriptor();
-    S.lat.push(performance.now() - a0); // độ trễ của riêng lần quét này
-    S.attempts++;
-    S.hit.push(!!d);
-    S.dists.push(null); // khoảng cách của lần quét này (null nếu không thấy mặt)
-
     if (d) {
       seenFace = true;
-      S.faces++;
-      if (S.firstFaceMs === null) S.firstFaceMs = performance.now() - t0;
       const m = bestMatch(d);
-      S.dists[S.dists.length - 1] = +m.dist.toFixed(3);
-      if (S.minDist === null || m.dist < S.minDist) {
-        S.minDist = m.dist;
-        S.minName = m.emp ? m.emp.name : "";
-      }
       const emp = m.dist <= THRESHOLD ? m.emp : null;
       if (emp) {
         streak = emp.id === streakId ? streak + 1 : 1;
         streakId = emp.id;
-        if (streak >= 2) {
-          S.matchMs = performance.now() - t0;
-          return { emp, stats: finishStats(S, t0, "matched") };
-        }
+        if (streak >= 2) return { emp };
       } else {
         streak = 0;
         streakId = null;
@@ -492,8 +397,7 @@ async function recognise(token) {
     }
     await sleep(SCAN_GAP_MS);
   }
-  const outcome = seenFace ? "unknown" : "noface";
-  return { error: outcome, stats: finishStats(S, t0, outcome) };
+  return { error: seenFace ? "unknown" : "noface" };
 }
 const REASON = {
   noface: "No face detected.",
@@ -505,7 +409,6 @@ async function doCheck(type) {
   setActiveBtn(type);
   const label = type === "IN" ? "Check in" : "Check out";
   const token = ++scanToken;
-  const tBtn = performance.now(); // mốc bắt đầu: lúc bấm nút
   lastAction = () => doCheck(type);
   openScan(label, "Look straight at the camera.");
 
@@ -519,17 +422,11 @@ async function doCheck(type) {
       sub: cameraReason(),
     });
   }
-  const camMs = Math.round(performance.now() - tBtn); // thời gian mở camera
 
   try {
     const res = await recognise(token);
     if (res.cancelled || token !== scanToken) return;
     if (res.error) {
-      const T = {
-        camMs,
-        totalUiMs: Math.round(performance.now() - tBtn),
-      };
-      sendMetrics(type, res, T);
       return showResult({
         ok: false,
         title: label + " Fail",
@@ -539,12 +436,10 @@ async function doCheck(type) {
 
     // Không chờ máy chủ: kiểm tra nhanh bằng trạng thái đã tải, hiện kết quả ngay, rồi ghi nhận ở nền.
     // Máy chủ vẫn là nơi quyết định cuối cùng; nếu khác kết quả đã hiện thì báo muộn (xem applyServerResult).
-    const T = { camMs, totalUiMs: Math.round(performance.now() - tBtn) };
     const known = employees.find((x) => x.id === res.emp.id);
     const st = known && known.status;
     if (st && st.type === type) {
       // trùng loại với lần gần nhất hôm nay
-      sendMetrics(type, res, T);
       return handleLog(res.emp, type, label, {
         status: "SAME",
         time: st.time,
@@ -552,11 +447,9 @@ async function doCheck(type) {
     }
     if (!st && type === "OUT") {
       // check out khi hôm nay chưa check in
-      sendMetrics(type, res, T);
       return handleLog(res.emp, type, label, { status: "NO_IN" });
     }
     if (st && st.type === "OUT" && type === "IN") {
-      sendMetrics(type, res, T);
       return handleLog(res.emp, type, label, {
         status: "DONE_OUT",
         time: st.time,
@@ -566,7 +459,7 @@ async function doCheck(type) {
       status: "OK",
       time: localTime(Date.now()),
     });
-    enqueueCheck(res.emp, type, { type, res, T });
+    enqueueCheck(res.emp, type);
   } catch (e) {
     showResult({ ok: false, title: label + " Fail", sub: errText(e) });
   }
@@ -609,22 +502,6 @@ let pcEmp = null,
   pcBusy = false,
   pcAct = null; // chức năng đã chọn trước khi nhập PIN: "IN" | "OUT" | "FACE"
 const PC_LABEL = { IN: "Clock in", OUT: "Clock out", FACE: "register face" };
-// Khóa phía kiosk khi server báo sai PIN quá 5 lần: mã nhân viên -> thời điểm hết khóa (ms).
-// Chỉ để làm mờ bàn phím; việc khóa thật vẫn do server quyết định.
-const PC_LOCK_MS = 5 * 60 * 1000;
-const PC_LOCK_MSG = "Too many wrong attempts. Try again in 5 minutes.";
-const pcLock = {};
-const pcLocked = () => !!pcEmp && (pcLock[pcEmp.id] || 0) > Date.now();
-function pcSetLock(id) {
-  pcLock[id] = Date.now() + PC_LOCK_MS;
-  setTimeout(() => {
-    // hết khóa: mở lại bàn phím nếu khung PIN đang mở cho đúng người này
-    if ($("pinDlg").open && pcEmp && pcEmp.id === id && !pcLocked()) {
-      pcSay("Choose an action, then enter your PIN");
-      pcRefresh();
-    }
-  }, PC_LOCK_MS + 500);
-}
 
 function pcRefresh() {
   $("pcSub").textContent = pcEmp ? pcEmp.name : "";
@@ -643,12 +520,11 @@ function pcRefresh() {
   $("pcOut").classList.toggle("dim", !!pcAct && pcAct !== "OUT");
   $("pcFace").classList.toggle("dim", !!pcAct && pcAct !== "FACE");
   // Làm mờ ô nhập PIN (4 chấm + bàn phím) và khóa không cho bấm cho tới khi chọn một nút chức năng
-  const keysOff = !pcAct || pcLocked(); // chưa chọn chức năng, hoặc đang bị khóa do sai PIN
-  $("pcDots").classList.toggle("locked", keysOff);
-  $("pcKeys").classList.toggle("locked", keysOff);
+  $("pcDots").classList.toggle("locked", !pcAct);
+  $("pcKeys").classList.toggle("locked", !pcAct);
   $("pcKeys")
     .querySelectorAll("button")
-    .forEach((b) => (b.disabled = keysOff));
+    .forEach((b) => (b.disabled = !pcAct));
 }
 function pcSay(t, err) {
   $("pcMsg").textContent = t || "";
@@ -659,10 +535,7 @@ function openPanel(emp) {
   pcBuf = "";
   pcBusy = false;
   pcAct = null;
-  pcSay(
-    pcLocked() ? PC_LOCK_MSG : "Choose an action, then enter your PIN",
-    pcLocked(),
-  );
+  pcSay("Choose an action, then enter your PIN");
   pcRefresh();
   render(); // làm sáng box tên đang chọn
   $("pinDlg").showModal();
@@ -677,7 +550,7 @@ function openResultFor(emp) {
   if (!$("scanDlg").open) $("scanDlg").showModal();
 }
 function pcPress(k) {
-  if (pcBusy || !pcAct || pcLocked()) return; // chưa chọn chức năng hoặc đang bị khóa thì không nhập PIN
+  if (pcBusy || !pcAct) return; // chưa chọn chức năng thì không nhập PIN
   if (k === "c") pcBuf = "";
   else if (k === "b") pcBuf = pcBuf.slice(0, -1);
   else if (pcBuf.length < 4) pcBuf += k;
@@ -700,8 +573,7 @@ function pcChoose(act) {
   }
   if (pcBuf.length === 4) return pcRun(act);
   pcAct = act;
-  if (pcLocked()) pcSay(PC_LOCK_MSG, true);
-  else pcSay("Enter your PIN to " + PC_LABEL[act]);
+  pcSay("Enter your PIN to " + PC_LABEL[act]);
   pcRefresh();
 }
 async function pcSubmit(type) {
@@ -732,9 +604,10 @@ async function pcSubmit(type) {
     }
     if (r.status === "LOCKED") {
       pcBuf = "";
-      pcSetLock(emp.id);
-      pcRefresh();
-      return pcSay(PC_LOCK_MSG, true);
+      return pcSay(
+        "Too many wrong attempts. Try again in 5 minutes.",
+        true,
+      );
     }
     openResultFor(emp);
     handleLog(emp, type, label, r); // r.status: OK hoặc UNKNOWN
@@ -761,7 +634,6 @@ async function pcRegisterFace() {
   } catch (e) {
     pcBuf = "";
     pcBusy = false;
-    if (/^Too many wrong attempts/.test(errText(e))) pcSetLock(emp.id);
     pcRefresh();
     return pcSay(errText(e), true);
   }
@@ -854,23 +726,8 @@ const POSES = [
   },
 ];
 
-// Mặt này đã đăng ký dưới một mã khác chưa? (so với mẫu của mọi mã khác ngoài ownId)
-const FACE_CLASH_MSG =
-  "This face is already registered under another staff code.";
-function faceClash(vecs, ownId) {
-  return employees.some(
-    (e) =>
-      e.id !== ownId &&
-      e.descs &&
-      e.descs.some((d) =>
-        vecs.some((v) => faceapi.euclideanDistance(v, d) <= THRESHOLD),
-      ),
-  );
-}
-
 // Trả về { samples } (mỗi mẫu là 1 vector 128 chiều), hoặc { cancelled }, hoặc { error: 'thông báo' }
-// ownId: mã đang đăng ký, dùng để kiểm tra trùng mặt ngay sau góc nhìn thẳng
-async function capturePoses(token, ownId) {
+async function capturePoses(token) {
   const samples = [];
   await sleep(700);
   for (let i = 0; i < POSES.length; i++) {
@@ -900,9 +757,6 @@ async function capturePoses(token, ownId) {
         error: `Could not capture the "${pose.name}" angle. Turn slightly in the right direction and try again.`,
       };
     }
-    if (i === 0 && faceClash(samples, ownId)) {
-      return { error: FACE_CLASH_MSG }; // dừng ngay, không quay hai góc còn lại
-    }
     if (i < POSES.length - 1) {
       $("camHint").textContent = "Good. Get ready for the next step...";
       await sleep(900);
@@ -931,7 +785,7 @@ async function doRegister(id, pin, overwrite) {
   }
 
   try {
-    const cap = await capturePoses(token, id);
+    const cap = await capturePoses(token);
     if (cap.cancelled || token !== scanToken) return;
     if (cap.error)
       return showResult({
@@ -944,12 +798,20 @@ async function doRegister(id, pin, overwrite) {
     const vecs = cap.samples.map((s) =>
       Array.from(s, (v) => +v.toFixed(4)),
     );
-    // Kiểm tra lần cuối với đủ các góc (server vẫn kiểm tra lại)
-    if (faceClash(vecs, id))
+    // Chặn một khuôn mặt đăng ký cho hai mã: so với mẫu của mọi mã khác (server kiểm tra lại)
+    const clash = employees.find(
+      (e) =>
+        e.id !== id &&
+        e.descs &&
+        e.descs.some((d) =>
+          vecs.some((v) => faceapi.euclideanDistance(v, d) <= THRESHOLD),
+        ),
+    );
+    if (clash)
       return showResult({
         ok: false,
         title: "Registration Fail",
-        sub: FACE_CLASH_MSG,
+        sub: "This face is already registered under another staff code.",
       });
     const empName = await api("registerEmployee", {
       id,
@@ -1005,7 +867,7 @@ function loadQueue() {
   }
 }
 function saveQueue() {
-  // lưu vào máy để không mất khi tải lại trang (bỏ phần số liệu đo _m)
+  // lưu vào máy để không mất khi tải lại trang
   try {
     localStorage.setItem(
       QUEUE_KEY,
@@ -1071,14 +933,13 @@ async function refreshStatuses() {
   } catch (e) {}
 }
 
-function enqueueCheck(emp, type, metricsCtx) {
+function enqueueCheck(emp, type) {
   syncQueue.push({
     id: emp.id,
     name: emp.name,
     type,
     ts: Date.now(),
     tries: 0,
-    _m: metricsCtx,
   });
   saveQueue();
   processQueue();
@@ -1163,17 +1024,6 @@ function applyServerResult(item, call) {
     });
     refreshStatuses();
   }
-
-  // Gửi số liệu đo, kèm thời gian logCheck thật
-  if (item._m)
-    sendMetrics(
-      item._m.type,
-      item._m.res,
-      Object.assign({}, item._m.T, {
-        logRtMs: call.rtMs,
-        logServerMs: call.serverMs,
-      }),
-    );
 }
 window.addEventListener("online", processQueue);
 
